@@ -1,0 +1,24 @@
+{
+  "name": "@cardpointers/cli",
+  "version": "0.0.0",
+  "description": "CardPointers CLI — manage your credit card rewards from the terminal",
+  "bin": {
+    "cardpointers": "./cardpointers"
+  },
+  "keywords": [
+    "credit cards",
+    "rewards",
+    "offers",
+    "mcp",
+    "cli"
+  ],
+  "homepage": "https://cardpointers.com",
+  "repository": "cardpointers/cli",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14"
+  },
+  "files": [
+    "cardpointers"
+  ]
+}
