@@ -1,0 +1,640 @@
+#!/usr/bin/env bash
+CLI_VERSION="1.0.0"
+#
+# CardPointers CLI — talk to the MCP server from your terminal
+#
+# Usage:
+#   cardpointers login                          # authenticate
+#   cardpointers recommend groceries            # best card for a category
+#   cardpointers recommend --merchant amazon    # best card for a merchant
+#   cardpointers cards                          # list your cards
+#   cardpointers cards --status all             # include applied/denied/closed
+#   cardpointers cards --bank chase              # filter by bank name
+#   cardpointers cards -b amex -s all             # all Amex cards
+#   cardpointers offers                         # list active offers
+#   cardpointers offers --expiring              # expiring within 7 days
+#   cardpointers offers --expiring 14           # expiring within 14 days
+#   cardpointers offers --favorite              # show only favorited offers
+#   cardpointers search "whole foods"           # search your offers
+#   cardpointers search "streaming" --favorite  # search only favorited offers
+#   cardpointers ping                           # test connection
+#   cardpointers tools                          # list available tools
+#   cardpointers logout                         # clear saved token
+#
+# Config: ~/.cardpointers/config
+
+set -uo pipefail
+
+CONFIG_DIR="${HOME}/.cardpointers"
+CONFIG_FILE="${CONFIG_DIR}/config"
+API_BASE="${CARDPOINTERS_API:-https://mcp.cardpointers.com}"
+DEBUG="${CARDPOINTERS_DEBUG:-0}"
+
+# ─── Helpers ──────────────────────────────────────────────────────
+
+die()  { echo "❌ $*" >&2; exit 1; }
+info() { echo "ℹ️  $*"; }
+ok()   { echo "✅ $*"; }
+
+ensure_config_dir() {
+    [ -d "$CONFIG_DIR" ] || mkdir -p "$CONFIG_DIR" && chmod 700 "$CONFIG_DIR"
+}
+
+save_token() {
+    ensure_config_dir
+    echo "$1" > "$CONFIG_FILE"
+    chmod 600 "$CONFIG_FILE"
+}
+
+save_user_info() {
+    ensure_config_dir
+    local email="${1:-}"
+    local uuid="${2:-}"
+    local is_pro="${3:-}"
+    echo "{\"email\":\"${email}\",\"uuid\":\"${uuid}\",\"is_pro\":${is_pro}}" > "${CONFIG_DIR}/user.json"
+    chmod 600 "${CONFIG_DIR}/user.json"
+}
+
+load_token() {
+    if [ ! -f "$CONFIG_FILE" ]; then
+        die "Not logged in. Run: cardpointers login"
+    fi
+    cat "$CONFIG_FILE"
+}
+
+load_user_info() {
+    if [ -f "${CONFIG_DIR}/user.json" ]; then
+        cat "${CONFIG_DIR}/user.json"
+    fi
+}
+
+# JSON-RPC 2.0 call to /mcp
+mcp_call() {
+    local method="$1"
+    local params="${2:-null}"
+    local token
+    token=$(load_token)
+
+    local response
+    response=$(curl -s -w "\n%{http_code}" \
+        -X POST "${API_BASE}/mcp" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${token}" \
+        -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"${method}\",\"params\":${params}}")
+
+    local http_code body
+    http_code=$(echo "$response" | tail -1)
+    body=$(echo "$response" | sed '$d')
+
+    if [ "$DEBUG" = "1" ]; then
+        echo "[DEBUG] POST ${API_BASE}/mcp → HTTP ${http_code}" >&2
+        echo "[DEBUG] Body: ${body}" >&2
+    fi
+
+    if [ -z "$body" ]; then
+        die "Empty response from server (HTTP ${http_code})"
+    fi
+
+    if [ "$http_code" = "401" ] || [ "$http_code" = "403" ]; then
+        die "Auth failed (HTTP ${http_code}). Run: cardpointers login"
+    fi
+
+    if [ "$http_code" != "200" ] && [ "$http_code" != "204" ]; then
+        echo "⚠️  HTTP ${http_code} response:" >&2
+        echo "$body" >&2
+        die "Server returned HTTP ${http_code}"
+    fi
+
+    # Check for JSON-RPC error
+    local error
+    error=$(echo "$body" | jq -r '.error.message // empty' 2>/dev/null)
+    if [ -n "$error" ]; then
+        local err_code upgrade_url
+        err_code=$(echo "$body" | jq -r '.error.code // ""' 2>/dev/null)
+        upgrade_url=$(echo "$body" | jq -r '.error.data.upgrade_url // empty' 2>/dev/null)
+
+        if [ "$err_code" = "-32001" ]; then
+            echo "" >&2
+            echo "⭐ ${error}" >&2
+            if [ -n "$upgrade_url" ]; then
+                echo "" >&2
+                echo "  Upgrade: ${upgrade_url}" >&2
+            fi
+            echo "" >&2
+            exit 1
+        fi
+
+        die "MCP error ${err_code}: ${error}"
+    fi
+
+    echo "$body"
+}
+
+# Extract tool result text and parse as JSON
+tool_call() {
+    local tool_name="$1"
+    local arguments="$2"
+    local response
+    response=$(mcp_call "tools/call" "{\"name\":\"${tool_name}\",\"arguments\":${arguments}}") || exit 1
+
+    if [ -z "$response" ]; then
+        die "No response from MCP server"
+    fi
+
+    # The result.content[0].text is a JSON string
+    local text
+    text=$(echo "$response" | jq -r '.result.content[0].text' 2>/dev/null)
+
+    if [ -z "$text" ] || [ "$text" = "null" ]; then
+        # Dump raw response for debugging
+        echo "⚠️  Unexpected response:" >&2
+        echo "$response" | jq . 2>/dev/null >&2 || echo "$response" >&2
+        die "Could not extract tool result"
+    fi
+
+    # Try to parse as JSON, fall back to raw text
+    echo "$text" | jq . 2>/dev/null || echo "$text"
+}
+
+# ─── Commands ─────────────────────────────────────────────────────
+
+verify_mcp() {
+    local init
+    init=$(mcp_call "initialize" 2>/dev/null) || true
+    local version
+    version=$(echo "$init" | jq -r '.result.serverInfo.version // empty' 2>/dev/null)
+    if [ -n "$version" ]; then
+        ok "Connected to CardPointers MCP v${version}"
+    fi
+}
+
+cmd_login() {
+    echo "🔐 CardPointers Login"
+    echo ""
+    echo "  1) Email & password"
+    echo "  2) Sign in via web (Apple/Google or passkey)"
+    echo ""
+    printf "Choose (1/2): "
+    read -r choice
+
+    case "$choice" in
+        1) cmd_login_email ;;
+        2) cmd_login_browser ;;
+        *) die "Invalid choice. Run: cardpointers login" ;;
+    esac
+}
+
+cmd_login_email() {
+    local email password
+
+    printf "Email: "
+    read -r email
+    printf "Password: "
+    read -rs password
+    echo ""
+
+    local response
+    response=$(curl -s -w "\n%{http_code}" \
+        -X POST "${API_BASE}/api/login_check" \
+        -H "Content-Type: application/json" \
+        -d "{\"username\":\"${email}\",\"password\":\"${password}\"}")
+
+    local http_code body
+    http_code=$(echo "$response" | tail -1)
+    body=$(echo "$response" | sed '$d')
+
+    if [ "$http_code" != "200" ]; then
+        die "Login failed (HTTP ${http_code})"
+    fi
+
+    local token
+    token=$(echo "$body" | jq -r '.token // empty' 2>/dev/null)
+
+    if [ -z "$token" ]; then
+        die "Login failed — no token returned"
+    fi
+
+    save_token "$token"
+    # Fetch user info via initialize + a quick /me-style check isn't available,
+    # so save what we know. UUID will be populated on first tool call or status.
+    save_user_info "$email" "" "false"
+    ok "Logged in as ${email}"
+    verify_mcp
+}
+
+cmd_login_browser() {
+    # Step 1: Request device code
+    local response
+    response=$(curl -s -w "\n%{http_code}" \
+        -X POST "${API_BASE}/api/device/code" \
+        -H "Content-Type: application/json")
+
+    local http_code body
+    http_code=$(echo "$response" | tail -1)
+    body=$(echo "$response" | sed '$d')
+
+    if [ "$http_code" != "200" ]; then
+        die "Failed to start login (HTTP ${http_code})"
+    fi
+
+    local device_code user_code verify_url
+    device_code=$(echo "$body" | jq -r '.device_code // empty' 2>/dev/null)
+    user_code=$(echo "$body" | jq -r '.user_code // empty' 2>/dev/null)
+    verify_url=$(echo "$body" | jq -r '.verification_uri_complete // empty' 2>/dev/null)
+
+    if [ -z "$device_code" ] || [ -z "$user_code" ]; then
+        die "Failed to get device code"
+    fi
+
+    # Step 2: Open browser
+    echo "Opening your browser to authorize..."
+    echo ""
+    echo "  Your code: ${user_code}"
+    echo ""
+
+    # Try to open browser
+    if command -v open >/dev/null 2>&1; then
+        open "$verify_url" 2>/dev/null || true
+    elif command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$verify_url" 2>/dev/null || true
+    fi
+
+    echo "If your browser didn't open, go to:"
+    echo "  ${verify_url}"
+    echo ""
+    echo "Waiting for authorization..."
+
+    # Step 3: Poll for token
+    local interval=5
+    local max_attempts=180  # 15 minutes at 5s intervals
+    local attempt=0
+
+    while [ $attempt -lt $max_attempts ]; do
+        sleep $interval
+        attempt=$((attempt + 1))
+
+        response=$(curl -s -w "\n%{http_code}" \
+            -X POST "${API_BASE}/api/device/token" \
+            -H "Content-Type: application/json" \
+            -d "{\"device_code\":\"${device_code}\"}")
+
+        http_code=$(echo "$response" | tail -1)
+        body=$(echo "$response" | sed '$d')
+
+        local error
+        error=$(echo "$body" | jq -r '.error // empty' 2>/dev/null)
+
+        case "$error" in
+            authorization_pending)
+                printf "." ;;
+            access_denied)
+                echo ""
+                die "Authorization was denied" ;;
+            expired_token)
+                echo ""
+                die "Code expired. Run 'cardpointers login' to try again." ;;
+            "")
+                # No error — check for token
+                local token email
+                token=$(echo "$body" | jq -r '.access_token // empty' 2>/dev/null)
+                email=$(echo "$body" | jq -r '.email // empty' 2>/dev/null)
+
+                if [ -n "$token" ]; then
+                    echo ""
+                    save_token "$token"
+                    local uuid is_pro_val
+                    uuid=$(echo "$body" | jq -r '.uuid // ""' 2>/dev/null)
+                    is_pro_val=$(echo "$body" | jq -r '.is_pro // false' 2>/dev/null)
+                    save_user_info "$email" "$uuid" "$is_pro_val"
+                    ok "Logged in as ${email}"
+
+                    verify_mcp
+                    return 0
+                fi
+                printf "." ;;
+            *)
+                echo ""
+                die "Login failed: ${error}" ;;
+        esac
+    done
+
+    echo ""
+    die "Timed out waiting for authorization. Run 'cardpointers login' to try again."
+}
+
+cmd_logout() {
+    rm -f "$CONFIG_FILE"
+    rm -f "${CONFIG_DIR}/user.json"
+    ok "Logged out"
+}
+
+cmd_ping() {
+    local response
+    response=$(mcp_call "ping")
+    ok "Connected to CardPointers MCP"
+}
+
+cmd_tools() {
+    local response
+    response=$(mcp_call "tools/list")
+    echo "$response" | jq -r '.result.tools[] | "  \(.name) — \(.description)"' 2>/dev/null || \
+    echo "$response" | jq .
+}
+
+cmd_recommend() {
+    local category="" merchant="" amount=""
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --merchant|-m)
+                shift; merchant="$1" ;;
+            --amount|-a)
+                shift; amount="$1" ;;
+            *)
+                # Positional = category
+                if [ -z "$category" ]; then
+                    category="$1"
+                fi ;;
+        esac
+        shift
+    done
+
+    if [ -z "$category" ] && [ -z "$merchant" ]; then
+        die "Usage: cardpointers recommend <category> [--merchant <name>] [--amount <dollars>]"
+    fi
+
+    # Build arguments JSON
+    local args="{"
+    local first=true
+
+    if [ -n "$category" ]; then
+        args+="\"category\":\"${category}\""
+        first=false
+    fi
+    if [ -n "$merchant" ]; then
+        [ "$first" = false ] && args+=","
+        args+="\"merchant\":\"${merchant}\""
+        first=false
+    fi
+    if [ -n "$amount" ]; then
+        [ "$first" = false ] && args+=","
+        args+="\"amount\":${amount}"
+    fi
+    args+="}"
+
+    local result
+    result=$(tool_call "recommend_card" "$args") || exit 1
+
+    # Pretty print
+    local cat_name merchant_name
+    cat_name=$(echo "$result" | jq -r '.category // "Unknown"' 2>/dev/null)
+    merchant_name=$(echo "$result" | jq -r '.merchant // empty' 2>/dev/null)
+
+    echo ""
+    if [ -n "$merchant_name" ]; then
+        echo "🏪 Best cards for ${merchant_name} (${cat_name}):"
+    else
+        echo "💳 Best cards for ${cat_name}:"
+    fi
+    echo ""
+
+    echo "$result" | jq -r '.recommendations[]? | "  \(.card)\n    Rate: \(.reward_rate)\n    \(.earning_description)\n"' 2>/dev/null
+
+    local count
+    count=$(echo "$result" | jq -r '.recommendations | length' 2>/dev/null)
+    if [ "$count" = "0" ] 2>/dev/null; then
+        echo "  No cards found for this category."
+    fi
+}
+
+cmd_cards() {
+    local status="approved" bank=""
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --status|-s) shift; status="$1" ;;
+            --bank|-b)   shift; bank="$1" ;;
+            *) ;;
+        esac
+        shift
+    done
+
+    local args="{\"status\":\"${status}\""
+    if [ -n "$bank" ]; then
+        args+=",\"bank\":\"${bank}\""
+    fi
+    args+="}"
+
+    local result
+    result=$(tool_call "list_my_cards" "$args") || exit 1
+
+    local count
+    count=$(echo "$result" | jq -r '.count // 0' 2>/dev/null)
+
+    echo ""
+    echo "💳 Your cards (${status}): ${count}"
+    echo ""
+
+    echo "$result" | jq -r '.cards[]? | "  \(.card) (\(.bank // "Unknown"))\n    Status: \(.status) | Fee: $\(.annual_fee // "N/A") | Approved: \(.approval_date // "—") | Signup bonus: \(if .signup_bonus_earned == true then "✅ earned" elif .signup_bonus_earned == false then "⏳ not yet" else "—" end)\n"' 2>/dev/null
+}
+
+cmd_offers() {
+    local status="active" card="" category="" expiring_days="" offer_type="" bank="" favorite="0"
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --status|-s)    shift; status="$1" ;;
+            --expiring|-e)  status="expiring_soon"
+                            # Check if next arg is a number (days)
+                            if [ $# -gt 1 ] && [[ "$2" =~ ^[0-9]+$ ]]; then
+                                shift; expiring_days="$1"
+                            fi ;;
+            --card|-c)      shift; card="$1" ;;
+            --category|-y)  shift; category="$1" ;;
+            --type|-t)      shift; offer_type="$1" ;;
+            --bank|-b)      shift; bank="$1" ;;
+            --favorite|-f)  favorite="1" ;;
+            *) ;;
+        esac
+        shift
+    done
+
+    local args="{"
+    local first=true
+
+    args+="\"status\":\"${status}\""
+    first=false
+
+    if [ -n "$card" ]; then
+        args+=",\"card\":\"${card}\""
+    fi
+    if [ -n "$category" ]; then
+        args+=",\"category\":\"${category}\""
+    fi
+    if [ -n "$expiring_days" ]; then
+        args+=",\"expiring_days\":${expiring_days}"
+    fi
+    if [ -n "$offer_type" ]; then
+        args+=",\"type\":\"${offer_type}\""
+    fi
+    if [ -n "$bank" ]; then
+        args+=",\"bank\":\"${bank}\""
+    fi
+    if [ "$favorite" = "1" ]; then
+        args+=",\"is_favorite\":true"
+    fi
+    args+="}"
+
+    local result
+    result=$(tool_call "list_my_offers" "$args") || exit 1
+
+    local count
+    count=$(echo "$result" | jq -r '.count // 0' 2>/dev/null)
+
+    echo ""
+    echo "🎯 Your offers (${status}): ${count}"
+    echo ""
+
+    echo "$result" | jq -r '.offers[]? | "  \(if .is_favorite == true then "⭐ " else "" end)\(.title // "Untitled")\n    Card: \(.card // "—") | Value: \(if .value then "$\(.value)" else "—" end)\(if (.total_available // 0) > 0 then " | Used: \(.total_used // 0)/\(.total_available)" else "" end)\(if (.max_times // 0) > 1 then " | Max uses: \(.max_times)" else "" end) | Expires: \(.expiration // "—")\(if .redeemed_date then " | Redeemed: \(.redeemed_date)" else "" end)\n    \(.subtitle // "")\n"' 2>/dev/null
+}
+
+cmd_search() {
+    local favorite="0"
+    local query_parts=()
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --favorite|-f) favorite="1" ;;
+            *) query_parts+=("$1") ;;
+        esac
+        shift
+    done
+
+    local query="${query_parts[*]}"
+
+    if [ -z "$query" ]; then
+        die "Usage: cardpointers search <query>"
+    fi
+
+    local result
+    if [ "$favorite" = "1" ]; then
+        result=$(tool_call "search_my_offers" "{\"query\":\"${query}\",\"is_favorite\":true}") || exit 1
+    else
+        result=$(tool_call "search_my_offers" "{\"query\":\"${query}\"}") || exit 1
+    fi
+
+    local count
+    count=$(echo "$result" | jq -r '.count // 0' 2>/dev/null)
+
+    echo ""
+    echo "🔍 Search results for \"${query}\": ${count}"
+    echo ""
+
+    echo "$result" | jq -r '.offers[]? | "  \(if .is_favorite == true then "⭐ " else "" end)\(.title // "Untitled")\n    Card: \(.card // "—") | Merchant: \(.merchant // "—")\(if (.total_available // 0) > 0 then " | Used: \(.total_used // 0)/\(.total_available)" else "" end)\(if (.max_times // 0) > 1 then " | Max uses: \(.max_times)" else "" end) | Expires: \(.expiration // "—")\(if .redeemed_date then " | Redeemed: \(.redeemed_date)" else "" end)\n"' 2>/dev/null
+}
+
+cmd_status() {
+    local user_info
+    user_info=$(load_user_info)
+
+    if [ -z "$user_info" ]; then
+        die "Not logged in. Run: cardpointers login"
+    fi
+
+    local email uuid
+    email=$(echo "$user_info" | jq -r '.email // "Unknown"' 2>/dev/null)
+    uuid=$(echo "$user_info" | jq -r '.uuid // ""' 2>/dev/null)
+
+    echo ""
+    echo "📊 CardPointers CLI v${CLI_VERSION}"
+    echo ""
+    echo "  Email:  ${email}"
+    if [ -n "$uuid" ] && [ "$uuid" != "" ]; then
+        echo "  UUID:   ${uuid}"
+    fi
+    echo ""
+
+    # Test connection
+    local response
+    response=$(mcp_call "ping" 2>/dev/null) || true
+    if [ -n "$response" ]; then
+        echo "  Server: ✅ Connected to ${API_BASE}"
+    else
+        echo "  Server: ❌ Cannot reach ${API_BASE}"
+    fi
+    echo ""
+}
+
+cmd_help() {
+    local CPINK="\e[38;5;171m"
+    local CPBLUE="\e[38;5;69m"
+    local RESET="\e[0m"
+    local DESC_COL=40
+
+    _help_row() {
+        local plain="$1"
+        local colored="$2"
+        local desc="$3"
+        local pad=$((DESC_COL - ${#plain} - 1))
+        if ((pad < 1)); then
+            pad=1
+        fi
+        printf "%b%*s%s\n" "$colored" "$pad" "" "$desc"
+    }
+
+    printf "%bCardPointers%b CLI v${CLI_VERSION} — your cards in your terminal\n" "$CPINK" "$RESET"
+    echo ""
+    printf "%bUsage:%b cardpointers ${CPBLUE}<command>${RESET} [options]\n" "$CPINK" "$RESET"
+    echo ""
+    printf "%bCommands:%b\n" "$CPINK" "$RESET"
+    _help_row "  login" "  ${CPINK}login${RESET}" "Log in (supports Apple, Google, passkeys, etc)"
+    _help_row "  logout" "  ${CPINK}logout${RESET}" "Clear saved credentials"
+    _help_row "  status" "  ${CPINK}status${RESET}" "Show account info and connection status"
+    _help_row "  recommend <category>" "  ${CPINK}recommend${RESET} ${CPBLUE}<category>${RESET}" "Best card for a purchase category/store"
+    _help_row "    --merchant, -m <name>" "    ${CPINK}--merchant, -m${RESET} ${CPBLUE}<name>${RESET}" "Look up by merchant name/URL instead"
+    _help_row "    --amount, -a <dollars>" "    ${CPINK}--amount, -a${RESET} ${CPBLUE}<dollars>${RESET}" "Include estimated value"
+    _help_row "  cards" "  ${CPINK}cards${RESET}" "List your cards"
+    _help_row "    --status, -s <filter>" "    ${CPINK}--status, -s${RESET} ${CPBLUE}<filter>${RESET}" "approved (default), applied, denied, closed, all"
+    _help_row "    --bank, -b <name>" "    ${CPINK}--bank, -b${RESET} ${CPBLUE}<name>${RESET}" "Filter by bank name"
+    _help_row "  offers" "  ${CPINK}offers${RESET}" "List your offers"
+    _help_row "    --status, -s <filter>" "    ${CPINK}--status, -s${RESET} ${CPBLUE}<filter>${RESET}" "active (default), snoozed, redeemed, expired, all"
+    _help_row "    --expiring, -e [days]" "    ${CPINK}--expiring, -e${RESET} ${CPBLUE}[days]${RESET}" "Show offers expiring within N days (default: 7)"
+    _help_row "    --card, -c <name>" "    ${CPINK}--card, -c${RESET} ${CPBLUE}<name>${RESET}" "Filter by card name"
+    _help_row "    --category, -y <name>" "    ${CPINK}--category, -y${RESET} ${CPBLUE}<name>${RESET}" "Filter by category"
+    _help_row "    --type, -t <standard|personal>" "    ${CPINK}--type, -t${RESET} ${CPBLUE}<standard|personal>${RESET}" "Filter by offer type"
+    _help_row "    --bank, -b <name>" "    ${CPINK}--bank, -b${RESET} ${CPBLUE}<name>${RESET}" "Filter by bank (amex, chase, citi, boa, usbank, wellsfargo)"
+    _help_row "    --favorite, -f" "    ${CPINK}--favorite, -f${RESET}" "Show only favorited offers"
+    _help_row "  search <query>" "  ${CPINK}search${RESET} ${CPBLUE}<query>${RESET}" "Search your offers by keyword"
+    _help_row "    --favorite, -f" "    ${CPINK}--favorite, -f${RESET}" "Show only favorited offers"
+    _help_row "  ping" "  ${CPINK}ping${RESET}" "Test MCP connection"
+    _help_row "  tools" "  ${CPINK}tools${RESET}" "List available MCP tools"
+    echo ""
+    printf "%bEnvironment:%b\n" "$CPINK" "$RESET"
+    _help_row "  CARDPOINTERS_API" "  ${CPINK}CARDPOINTERS_API${RESET}" "API base URL (default: https://mcp.cardpointers.com)"
+    echo ""
+    echo "Config: ~/.cardpointers/config"
+}
+
+# ─── Main ─────────────────────────────────────────────────────────
+
+if [ $# -eq 0 ]; then
+    cmd_help
+    exit 0
+fi
+
+command="$1"
+shift
+
+case "$command" in
+    login)      cmd_login "$@" ;;
+    logout)     cmd_logout ;;
+    status)     cmd_status ;;
+    recommend)  cmd_recommend "$@" ;;
+    cards)      cmd_cards "$@" ;;
+    offers)     cmd_offers "$@" ;;
+    search)     cmd_search "$@" ;;
+    ping)       cmd_ping ;;
+    tools)      cmd_tools ;;
+    help|--help|-h) cmd_help ;;
+    *)          die "Unknown command: ${command}. Run: cardpointers help" ;;
+esac
