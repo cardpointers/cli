@@ -798,17 +798,13 @@ cmd_help() {
     _help_row "  ping" "  ${CPINK}ping${RESET}" "Test MCP connection"
     _help_row "  tools" "  ${CPINK}tools${RESET}" "List available MCP tools"
     echo ""
-    printf "${BOLD}%bGlobal options:%b${RESET}\n" "$CPINK" "$RESET"
-    _help_row "  --version" "  ${CPINK}--version${RESET}" "Show CLI version"
-    echo ""
-    printf "${BOLD}%bGlobal options:%b${RESET}\n" "$CPINK" "$RESET"
-    _help_row "  --json, -j" "  ${CPINK}--json, -j${RESET}" "Output raw JSON instead of formatted text"
-    echo ""
     printf "${BOLD}%bEnvironment:%b${RESET}\n" "$CPINK" "$RESET"
     _help_row "  CARDPOINTERS_API" "  ${CPINK}CARDPOINTERS_API${RESET}" "API base URL (default: https://mcp.cardpointers.com)"
     _help_row "  NO_COLOR" "  ${CPINK}NO_COLOR${RESET}" "Disable ANSI colors in output"
     echo ""
     echo "Config: ~/.cardpointers/config"
+    echo ""
+    echo "Add --json to any data command for raw JSON output."
 }
 
 # ─── Main ─────────────────────────────────────────────────────────
