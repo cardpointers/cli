@@ -797,7 +797,6 @@ cmd_help() {
     _help_row "  profiles" "  ${CPINK}profiles${RESET}" "List your linked profiles"
     _help_row "  ping" "  ${CPINK}ping${RESET}" "Test MCP connection"
     _help_row "  tools" "  ${CPINK}tools${RESET}" "List available MCP tools"
-    _help_row "  version" "  ${CPINK}version${RESET}" "Show CLI version"
     echo ""
     printf "${BOLD}%bGlobal options:%b${RESET}\n" "$CPINK" "$RESET"
     _help_row "  --version, -v" "  ${CPINK}--version, -v${RESET}" "Show CLI version"
@@ -820,7 +819,7 @@ if [ $# -eq 0 ]; then
 fi
 
 case "${1:-}" in
-    version|--version|-v)
+    --version|-v)
         cmd_version
         exit 0
         ;;
@@ -840,7 +839,6 @@ case "$command" in
     profiles)   cmd_profiles "$@" ;;
     ping)       cmd_ping ;;
     tools)      cmd_tools ;;
-    version|--version|-v) cmd_version ;;
     help|--help|-h) cmd_help ;;
     *)          die "Unknown command: ${command}. Run: cardpointers help" ;;
 esac
