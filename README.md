@@ -13,7 +13,7 @@
 
 CardPointers CLI lets you manage your [CardPointers](https://cardpointers.com) wallet from the command line — get card recommendations, browse your offers, search for deals, and more. Powered by the [CardPointers MCP API](https://mcp.cardpointers.com/mcp).
 
-> **Requires a [CardPointers+](https://cardpointers.com/pro/) (Pro) subscription.**
+> **Requires a [CardPointers+](https://cardpointers.com/plus/) subscription.**
 
 ## Install
 
