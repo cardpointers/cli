@@ -82,6 +82,17 @@ cardpointers cards --bank chase
 cardpointers cards --status all
 ```
 
+### Profiles
+
+Use `--profile` / `-p` to target a specific profile by number, name, or across all profiles:
+
+```bash
+cardpointers cards -p 2              # cards from profile 2
+cardpointers cards -p caroline       # cards from profile "Caroline"
+cardpointers offers -p all           # offers from all profiles
+cardpointers recommend gas -p any    # best gas card across all profiles
+```
+
 ### 4. Browse your offers
 
 ```bash
