@@ -656,7 +656,7 @@ cmd_profiles() {
         | .[]
         | .value as $p
         | ($p.is_self // $p.is_me // $p.is_current // $p.is_you // false) as $is_self
-        | "  P\((.key + 1))  \($p.nickname // "Unknown")" + (if $is_self then " ← you" else "" end)
+        | "  P\((.key + 1))" + (if $is_self then "  ← you" else "  \($p.nickname // "Unknown")" end)
     ' 2>/dev/null
 }
 
