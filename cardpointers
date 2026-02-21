@@ -799,7 +799,7 @@ cmd_help() {
     _help_row "  tools" "  ${CPINK}tools${RESET}" "List available MCP tools"
     echo ""
     printf "${BOLD}%bGlobal options:%b${RESET}\n" "$CPINK" "$RESET"
-    _help_row "  --version, -v" "  ${CPINK}--version, -v${RESET}" "Show CLI version"
+    _help_row "  --version" "  ${CPINK}--version${RESET}" "Show CLI version"
     echo ""
     printf "${BOLD}%bGlobal options:%b${RESET}\n" "$CPINK" "$RESET"
     _help_row "  --json, -j" "  ${CPINK}--json, -j${RESET}" "Output raw JSON instead of formatted text"
@@ -819,7 +819,7 @@ if [ $# -eq 0 ]; then
 fi
 
 case "${1:-}" in
-    --version|-v)
+    --version)
         cmd_version
         exit 0
         ;;
