@@ -778,7 +778,7 @@ case "$command" in
     cards)      cmd_cards "$@" ;;
     offers)     cmd_offers "$@" ;;
     search)     cmd_search "$@" ;;
-    profiles)   cmd_profiles ;;
+    profiles)   cmd_profiles "$@" ;;
     ping)       cmd_ping ;;
     tools)      cmd_tools ;;
     help|--help|-h) cmd_help ;;
