@@ -59,6 +59,17 @@ save_user_info() {
     chmod 600 "${CONFIG_DIR}/user.json"
 }
 
+# Format a profile param for display (e.g. "2" → "P2", "p3" → "P3", "caroline" → "caroline")
+format_profile_label() {
+    local p="$1"
+    if [[ "$p" =~ ^[pP]?[0-9]+$ ]]; then
+        # Strip leading p/P, prefix with P
+        echo "P${p#[pP]}"
+    else
+        echo "$p"
+    fi
+}
+
 load_token() {
     if [ ! -f "$CONFIG_FILE" ]; then
         die "Not logged in. Run: cardpointers login"
@@ -417,7 +428,7 @@ cmd_recommend() {
 
     local profile_label=""
     if [ -n "$profile" ]; then
-        profile_label=" [${profile}]"
+        profile_label=" [$(format_profile_label "$profile")]"
     fi
 
     echo ""
@@ -467,7 +478,7 @@ cmd_cards() {
 
     local label="Your"
     if [ -n "$profile" ]; then
-        label="${profile}'s"
+        label="$(format_profile_label "$profile")'s"
     fi
 
     echo ""
@@ -536,7 +547,7 @@ cmd_offers() {
 
     local label="Your"
     if [ -n "$profile" ]; then
-        label="${profile}'s"
+        label="$(format_profile_label "$profile")'s"
     fi
 
     echo ""
@@ -582,7 +593,7 @@ cmd_search() {
 
     local label=""
     if [ -n "$profile" ]; then
-        label=" (${profile})"
+        label=" ($(format_profile_label "$profile"))"
     fi
 
     echo ""
