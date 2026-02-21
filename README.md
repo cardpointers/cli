@@ -117,6 +117,16 @@ cardpointers search "streaming"
 cardpointers search "whole foods" --favorite
 ```
 
+## JSON output
+
+Add `--json` (or `-j`) to any data command to print raw JSON instead of the formatted output:
+
+```bash
+cardpointers cards --json
+cardpointers offers -j
+cardpointers recommend dining -j
+```
+
 ## All commands
 
 | Command | Description |
