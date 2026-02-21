@@ -42,6 +42,11 @@ CONFIG_FILE="${CONFIG_DIR}/config"
 API_BASE="${CARDPOINTERS_API:-https://mcp.cardpointers.com}"
 DEBUG="${CARDPOINTERS_DEBUG:-0}"
 
+# ─── Prerequisites ────────────────────────────────────────────────
+
+command -v curl >/dev/null 2>&1 || { echo "❌ curl is required. Install it and try again." >&2; exit 1; }
+command -v jq >/dev/null 2>&1 || { echo "❌ jq is required. Install it: brew install jq (macOS) or apt install jq (Linux)" >&2; exit 1; }
+
 # ─── Helpers ──────────────────────────────────────────────────────
 
 die()  { echo "❌ $*" >&2; exit 1; }
@@ -537,7 +542,7 @@ cmd_offers() {
             --favorite|-f)  favorite="1" ;;
             --profile|-p)   shift; profile="$1" ;;
             --limit|-l)     shift; limit="$1" ;;
-            --sort|-S)      shift; sort_by="$1" ;;
+            --sort|-r)      shift; sort_by="$1" ;;
             *) ;;
         esac
         shift
@@ -784,7 +789,7 @@ cmd_help() {
     _help_row "    --type, -t <standard|personal>" "    ${CPINK}--type, -t${RESET} ${CPBLUE}<standard|personal>${RESET}" "Filter by offer type"
     _help_row "    --bank, -b <name>" "    ${CPINK}--bank, -b${RESET} ${CPBLUE}<name>${RESET}" "Filter by bank (amex, chase, citi, boa, usbank, wellsfargo)"
     _help_row "    --favorite, -f" "    ${CPINK}--favorite, -f${RESET}" "Show only favorited offers"
-    _help_row "    --sort, -S <expiring|value|card>" "    ${CPINK}--sort, -S${RESET} ${CPBLUE}<expiring|value|card>${RESET}" "Sort offers"
+    _help_row "    --sort, -r <expiring|value|card>" "    ${CPINK}--sort, -r${RESET} ${CPBLUE}<expiring|value|card>${RESET}" "Sort offers"
     _help_row "  search <query>" "  ${CPINK}search${RESET} ${CPBLUE}<query>${RESET}" "Search your offers by keyword"
     _help_row "    --favorite, -f" "    ${CPINK}--favorite, -f${RESET}" "Show only favorited offers"
     _help_row "  profiles" "  ${CPINK}profiles${RESET}" "List your linked profiles"
