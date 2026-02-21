@@ -32,8 +32,6 @@ JSON_OUTPUT=0
 #   cardpointers tools                           # list available tools
 #   cardpointers logout                          # clear saved token
 #   cardpointers --version                       # show version
-#
-# Config: ~/.cardpointers/config
 
 set -uo pipefail
 
@@ -804,8 +802,6 @@ cmd_help() {
     printf "${BOLD}%bEnvironment:%b${RESET}\n" "$CPINK" "$RESET"
     _help_row "  CARDPOINTERS_API" "  ${CPINK}CARDPOINTERS_API${RESET}" "API base URL (default: https://mcp.cardpointers.com)"
     _help_row "  NO_COLOR" "  ${CPINK}NO_COLOR${RESET}" "Disable ANSI colors in output"
-    echo ""
-    echo "Config: ~/.cardpointers/config"
 }
 
 # ─── Main ─────────────────────────────────────────────────────────
