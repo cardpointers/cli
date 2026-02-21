@@ -5,32 +5,32 @@ JSON_OUTPUT=0
 # CardPointers CLI — talk to the MCP server from your terminal
 #
 # Usage:
-#   cardpointers login                          # authenticate
-#   cardpointers recommend supermarket            # best card for a category
-#   cardpointers recommend --merchant amazon    # best card for a merchant
-#   cardpointers cards                          # list your cards
-#   cardpointers cards --status all             # include applied/denied/closed
+#   cardpointers login                           # authenticate
+#   cardpointers recommend supermarket           # best card for a category
+#   cardpointers recommend --merchant amazon     # best card for a merchant
+#   cardpointers recommend gas -p any            # best gas card across all profiles
+#   cardpointers cards                           # list your cards
+#   cardpointers cards --status all              # include applied/denied/closed
 #   cardpointers cards --bank chase              # filter by bank name
-#   cardpointers cards -b amex -s all             # all Amex cards
+#   cardpointers cards -b amex -s all            # all Amex cards
 #   cardpointers cards -p 2                      # cards from profile 2
 #   cardpointers cards -p caroline               # cards from profile "Caroline"
 #   cardpointers cards --limit 5                 # limit card results
-#   cardpointers offers                         # list active offers
-#   cardpointers offers --expiring              # expiring within 7 days
-#   cardpointers offers --expiring 14           # expiring within 14 days
-#   cardpointers offers --favorite              # show only favorited offers
+#   cardpointers cards --json                    # raw JSON output
+#   cardpointers offers                          # list active offers
+#   cardpointers offers --expiring               # expiring within 7 days
+#   cardpointers offers --expiring 14            # expiring within 14 days
+#   cardpointers offers --favorite               # show only favorited offers
 #   cardpointers offers --sort value --limit 10  # sort and limit offers
 #   cardpointers offers -p all                   # offers from all profiles
-#   cardpointers cards --json                   # raw JSON output
-#   cardpointers offers -j                      # short form
-#   cardpointers search "whole foods"           # search your offers
-#   cardpointers search "streaming" --favorite  # search only favorited offers
+#   cardpointers offers -j                       # raw JSON (short form)
+#   cardpointers search "whole foods"            # search your offers
+#   cardpointers search "streaming" --favorite   # search only favorited offers
 #   cardpointers search "gas" --limit 5          # limit search results
-#   cardpointers recommend gas -p any            # best gas card across all profiles
 #   cardpointers profiles                        # list your profiles
-#   cardpointers ping                           # test connection
-#   cardpointers tools                          # list available tools
-#   cardpointers logout                         # clear saved token
+#   cardpointers ping                            # test connection
+#   cardpointers tools                           # list available tools
+#   cardpointers logout                          # clear saved token
 #   cardpointers --version                       # show version
 #
 # Config: ~/.cardpointers/config
