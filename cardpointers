@@ -11,12 +11,16 @@ CLI_VERSION="1.0.0"
 #   cardpointers cards --status all             # include applied/denied/closed
 #   cardpointers cards --bank chase              # filter by bank name
 #   cardpointers cards -b amex -s all             # all Amex cards
+#   cardpointers cards -p 2                      # cards from profile 2
+#   cardpointers cards -p caroline               # cards from profile "Caroline"
 #   cardpointers offers                         # list active offers
 #   cardpointers offers --expiring              # expiring within 7 days
 #   cardpointers offers --expiring 14           # expiring within 14 days
 #   cardpointers offers --favorite              # show only favorited offers
+#   cardpointers offers -p all                   # offers from all profiles
 #   cardpointers search "whole foods"           # search your offers
 #   cardpointers search "streaming" --favorite  # search only favorited offers
+#   cardpointers recommend gas -p any            # best gas card across all profiles
 #   cardpointers ping                           # test connection
 #   cardpointers tools                          # list available tools
 #   cardpointers logout                         # clear saved token
@@ -55,6 +59,17 @@ save_user_info() {
     chmod 600 "${CONFIG_DIR}/user.json"
 }
 
+# Format a profile param for display (e.g. "2" → "P2", "p3" → "P3", "caroline" → "caroline")
+format_profile_label() {
+    local p="$1"
+    if [[ "$p" =~ ^[pP]?[0-9]+$ ]]; then
+        # Strip leading p/P, prefix with P
+        echo "P${p#[pP]}"
+    else
+        echo "$p"
+    fi
+}
+
 load_token() {
     if [ ! -f "$CONFIG_FILE" ]; then
         die "Not logged in. Run: cardpointers login"
@@ -80,6 +95,7 @@ mcp_call() {
         -X POST "${API_BASE}/mcp" \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer ${token}" \
+        -H "X-MCP-Client: CardPointers CLI/${CLI_VERSION}" \
         -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"${method}\",\"params\":${params}}")
 
     local http_code body
@@ -130,10 +146,23 @@ mcp_call() {
     echo "$body"
 }
 
+MCP_INITIALIZED=0
+
+# Send initialize handshake (identifies CLI in server logs)
+mcp_initialize() {
+    if [ "$MCP_INITIALIZED" = "1" ]; then return; fi
+    MCP_INITIALIZED=1
+    mcp_call "initialize" "{\"clientInfo\":{\"name\":\"CardPointers CLI\",\"version\":\"${CLI_VERSION}\"}}" >/dev/null 2>&1 || true
+}
+
 # Extract tool result text and parse as JSON
 tool_call() {
     local tool_name="$1"
     local arguments="$2"
+
+    # Initialize once per invocation so the server logs the client name
+    mcp_initialize
+
     local response
     response=$(mcp_call "tools/call" "{\"name\":\"${tool_name}\",\"arguments\":${arguments}}") || exit 1
 
@@ -342,7 +371,7 @@ cmd_tools() {
 }
 
 cmd_recommend() {
-    local category="" merchant="" amount=""
+    local category="" merchant="" amount="" profile=""
 
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -350,6 +379,8 @@ cmd_recommend() {
                 shift; merchant="$1" ;;
             --amount|-a)
                 shift; amount="$1" ;;
+            --profile|-p)
+                shift; profile="$1" ;;
             *)
                 # Positional = category
                 if [ -z "$category" ]; then
@@ -379,6 +410,11 @@ cmd_recommend() {
     if [ -n "$amount" ]; then
         [ "$first" = false ] && args+=","
         args+="\"amount\":${amount}"
+        first=false
+    fi
+    if [ -n "$profile" ]; then
+        [ "$first" = false ] && args+=","
+        args+="\"profile\":\"${profile}\""
     fi
     args+="}"
 
@@ -390,11 +426,16 @@ cmd_recommend() {
     cat_name=$(echo "$result" | jq -r '.category // "Unknown"' 2>/dev/null)
     merchant_name=$(echo "$result" | jq -r '.merchant // empty' 2>/dev/null)
 
+    local profile_label=""
+    if [ -n "$profile" ]; then
+        profile_label=" [$(format_profile_label "$profile")]"
+    fi
+
     echo ""
     if [ -n "$merchant_name" ]; then
-        echo "🏪 Best cards for ${merchant_name} (${cat_name}):"
+        echo "🏪 Best cards for ${merchant_name} (${cat_name})${profile_label}:"
     else
-        echo "💳 Best cards for ${cat_name}:"
+        echo "💳 Best cards for ${cat_name}${profile_label}:"
     fi
     echo ""
 
@@ -408,12 +449,13 @@ cmd_recommend() {
 }
 
 cmd_cards() {
-    local status="approved" bank=""
+    local status="approved" bank="" profile=""
 
     while [ $# -gt 0 ]; do
         case "$1" in
             --status|-s) shift; status="$1" ;;
             --bank|-b)   shift; bank="$1" ;;
+            --profile|-p) shift; profile="$1" ;;
             *) ;;
         esac
         shift
@@ -423,6 +465,9 @@ cmd_cards() {
     if [ -n "$bank" ]; then
         args+=",\"bank\":\"${bank}\""
     fi
+    if [ -n "$profile" ]; then
+        args+=",\"profile\":\"${profile}\""
+    fi
     args+="}"
 
     local result
@@ -431,15 +476,20 @@ cmd_cards() {
     local count
     count=$(echo "$result" | jq -r '.count // 0' 2>/dev/null)
 
+    local label="Your"
+    if [ -n "$profile" ]; then
+        label="$(format_profile_label "$profile")'s"
+    fi
+
     echo ""
-    echo "💳 Your cards (${status}): ${count}"
+    echo "💳 ${label} cards (${status}): ${count}"
     echo ""
 
     echo "$result" | jq -r '.cards[]? | "  \(.card) (\(.bank // "Unknown"))\n    Status: \(.status) | Fee: $\(.annual_fee // "N/A") | Approved: \(.approval_date // "—") | Signup bonus: \(if .signup_bonus_earned == true then "✅ earned" elif .signup_bonus_earned == false then "⏳ not yet" else "—" end)\n"' 2>/dev/null
 }
 
 cmd_offers() {
-    local status="active" card="" category="" expiring_days="" offer_type="" bank="" favorite="0"
+    local status="active" card="" category="" expiring_days="" offer_type="" bank="" favorite="0" profile=""
 
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -454,6 +504,7 @@ cmd_offers() {
             --type|-t)      shift; offer_type="$1" ;;
             --bank|-b)      shift; bank="$1" ;;
             --favorite|-f)  favorite="1" ;;
+            --profile|-p)   shift; profile="$1" ;;
             *) ;;
         esac
         shift
@@ -483,6 +534,9 @@ cmd_offers() {
     if [ "$favorite" = "1" ]; then
         args+=",\"is_favorite\":true"
     fi
+    if [ -n "$profile" ]; then
+        args+=",\"profile\":\"${profile}\""
+    fi
     args+="}"
 
     local result
@@ -491,20 +545,26 @@ cmd_offers() {
     local count
     count=$(echo "$result" | jq -r '.count // 0' 2>/dev/null)
 
+    local label="Your"
+    if [ -n "$profile" ]; then
+        label="$(format_profile_label "$profile")'s"
+    fi
+
     echo ""
-    echo "🎯 Your offers (${status}): ${count}"
+    echo "🎯 ${label} offers (${status}): ${count}"
     echo ""
 
     echo "$result" | jq -r '.offers[]? | "  \(if .is_favorite == true then "⭐ " else "" end)\(.title // "Untitled")\n    Card: \(.card // "—") | Value: \(if .value then "$\(.value)" else "—" end)\(if (.total_available // 0) > 0 then " | Used: \(.total_used // 0)/\(.total_available)" else "" end)\(if (.max_times // 0) > 1 then " | Max uses: \(.max_times)" else "" end) | Expires: \(.expiration // "—")\(if .redeemed_date then " | Redeemed: \(.redeemed_date)" else "" end)\n    \(.subtitle // "")\n"' 2>/dev/null
 }
 
 cmd_search() {
-    local favorite="0"
+    local favorite="0" profile=""
     local query_parts=()
 
     while [ $# -gt 0 ]; do
         case "$1" in
             --favorite|-f) favorite="1" ;;
+            --profile|-p) shift; profile="$1" ;;
             *) query_parts+=("$1") ;;
         esac
         shift
@@ -516,18 +576,28 @@ cmd_search() {
         die "Usage: cardpointers search <query>"
     fi
 
-    local result
+    local args="{\"query\":\"${query}\""
     if [ "$favorite" = "1" ]; then
-        result=$(tool_call "search_my_offers" "{\"query\":\"${query}\",\"is_favorite\":true}") || exit 1
-    else
-        result=$(tool_call "search_my_offers" "{\"query\":\"${query}\"}") || exit 1
+        args+=",\"is_favorite\":true"
     fi
+    if [ -n "$profile" ]; then
+        args+=",\"profile\":\"${profile}\""
+    fi
+    args+="}"
+
+    local result
+    result=$(tool_call "search_my_offers" "$args") || exit 1
 
     local count
     count=$(echo "$result" | jq -r '.count // 0' 2>/dev/null)
 
+    local label=""
+    if [ -n "$profile" ]; then
+        label=" ($(format_profile_label "$profile"))"
+    fi
+
     echo ""
-    echo "🔍 Search results for \"${query}\": ${count}"
+    echo "🔍 Search results for \"${query}\"${label}: ${count}"
     echo ""
 
     echo "$result" | jq -r '.offers[]? | "  \(if .is_favorite == true then "⭐ " else "" end)\(.title // "Untitled")\n    Card: \(.card // "—") | Merchant: \(.merchant // "—")\(if (.total_available // 0) > 0 then " | Used: \(.total_used // 0)/\(.total_available)" else "" end)\(if (.max_times // 0) > 1 then " | Max uses: \(.max_times)" else "" end) | Expires: \(.expiration // "—")\(if .redeemed_date then " | Redeemed: \(.redeemed_date)" else "" end)\n"' 2>/dev/null
@@ -594,9 +664,11 @@ cmd_help() {
     _help_row "  recommend <category>" "  ${CPINK}recommend${RESET} ${CPBLUE}<category>${RESET}" "Best card for a purchase category/store"
     _help_row "    --merchant, -m <name>" "    ${CPINK}--merchant, -m${RESET} ${CPBLUE}<name>${RESET}" "Look up by merchant name/URL instead"
     _help_row "    --amount, -a <dollars>" "    ${CPINK}--amount, -a${RESET} ${CPBLUE}<dollars>${RESET}" "Include estimated value"
+    _help_row "    --profile, -p <value>" "    ${CPINK}--profile, -p${RESET} ${CPBLUE}<value>${RESET}" "Filter by profile (number, name, all)"
     _help_row "  cards" "  ${CPINK}cards${RESET}" "List your cards"
     _help_row "    --status, -s <filter>" "    ${CPINK}--status, -s${RESET} ${CPBLUE}<filter>${RESET}" "approved (default), applied, denied, closed, all"
     _help_row "    --bank, -b <name>" "    ${CPINK}--bank, -b${RESET} ${CPBLUE}<name>${RESET}" "Filter by bank name"
+    _help_row "    --profile, -p <value>" "    ${CPINK}--profile, -p${RESET} ${CPBLUE}<value>${RESET}" "Filter by profile (number, name, all)"
     _help_row "  offers" "  ${CPINK}offers${RESET}" "List your offers"
     _help_row "    --status, -s <filter>" "    ${CPINK}--status, -s${RESET} ${CPBLUE}<filter>${RESET}" "active (default), snoozed, redeemed, expired, all"
     _help_row "    --expiring, -e [days]" "    ${CPINK}--expiring, -e${RESET} ${CPBLUE}[days]${RESET}" "Show offers expiring within N days (default: 7)"
@@ -605,8 +677,10 @@ cmd_help() {
     _help_row "    --type, -t <standard|personal>" "    ${CPINK}--type, -t${RESET} ${CPBLUE}<standard|personal>${RESET}" "Filter by offer type"
     _help_row "    --bank, -b <name>" "    ${CPINK}--bank, -b${RESET} ${CPBLUE}<name>${RESET}" "Filter by bank (amex, chase, citi, boa, usbank, wellsfargo)"
     _help_row "    --favorite, -f" "    ${CPINK}--favorite, -f${RESET}" "Show only favorited offers"
+    _help_row "    --profile, -p <value>" "    ${CPINK}--profile, -p${RESET} ${CPBLUE}<value>${RESET}" "Filter by profile (number, name, all)"
     _help_row "  search <query>" "  ${CPINK}search${RESET} ${CPBLUE}<query>${RESET}" "Search your offers by keyword"
     _help_row "    --favorite, -f" "    ${CPINK}--favorite, -f${RESET}" "Show only favorited offers"
+    _help_row "    --profile, -p <value>" "    ${CPINK}--profile, -p${RESET} ${CPBLUE}<value>${RESET}" "Filter by profile (number, name, all)"
     _help_row "  ping" "  ${CPINK}ping${RESET}" "Test MCP connection"
     _help_row "  tools" "  ${CPINK}tools${RESET}" "List available MCP tools"
     echo ""
