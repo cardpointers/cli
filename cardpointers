@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-CLI_VERSION="1.0.0"
+CLI_VERSION="1.0.1"
 JSON_OUTPUT=0
 #
 # CardPointers CLI — talk to the MCP server from your terminal
