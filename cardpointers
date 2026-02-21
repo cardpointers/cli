@@ -84,6 +84,7 @@ mcp_call() {
         -X POST "${API_BASE}/mcp" \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer ${token}" \
+        -H "X-MCP-Client: CardPointers CLI/${CLI_VERSION}" \
         -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"${method}\",\"params\":${params}}")
 
     local http_code body
@@ -134,10 +135,23 @@ mcp_call() {
     echo "$body"
 }
 
+MCP_INITIALIZED=0
+
+# Send initialize handshake (identifies CLI in server logs)
+mcp_initialize() {
+    if [ "$MCP_INITIALIZED" = "1" ]; then return; fi
+    MCP_INITIALIZED=1
+    mcp_call "initialize" "{\"clientInfo\":{\"name\":\"CardPointers CLI\",\"version\":\"${CLI_VERSION}\"}}" >/dev/null 2>&1 || true
+}
+
 # Extract tool result text and parse as JSON
 tool_call() {
     local tool_name="$1"
     local arguments="$2"
+
+    # Initialize once per invocation so the server logs the client name
+    mcp_initialize
+
     local response
     response=$(mcp_call "tools/call" "{\"name\":\"${tool_name}\",\"arguments\":${arguments}}") || exit 1
 
