@@ -415,11 +415,16 @@ cmd_recommend() {
     cat_name=$(echo "$result" | jq -r '.category // "Unknown"' 2>/dev/null)
     merchant_name=$(echo "$result" | jq -r '.merchant // empty' 2>/dev/null)
 
+    local profile_label=""
+    if [ -n "$profile" ]; then
+        profile_label=" [${profile}]"
+    fi
+
     echo ""
     if [ -n "$merchant_name" ]; then
-        echo "🏪 Best cards for ${merchant_name} (${cat_name}):"
+        echo "🏪 Best cards for ${merchant_name} (${cat_name})${profile_label}:"
     else
-        echo "💳 Best cards for ${cat_name}:"
+        echo "💳 Best cards for ${cat_name}${profile_label}:"
     fi
     echo ""
 
@@ -460,8 +465,13 @@ cmd_cards() {
     local count
     count=$(echo "$result" | jq -r '.count // 0' 2>/dev/null)
 
+    local label="Your"
+    if [ -n "$profile" ]; then
+        label="${profile}'s"
+    fi
+
     echo ""
-    echo "💳 Your cards (${status}): ${count}"
+    echo "💳 ${label} cards (${status}): ${count}"
     echo ""
 
     echo "$result" | jq -r '.cards[]? | "  \(.card) (\(.bank // "Unknown"))\n    Status: \(.status) | Fee: $\(.annual_fee // "N/A") | Approved: \(.approval_date // "—") | Signup bonus: \(if .signup_bonus_earned == true then "✅ earned" elif .signup_bonus_earned == false then "⏳ not yet" else "—" end)\n"' 2>/dev/null
@@ -524,8 +534,13 @@ cmd_offers() {
     local count
     count=$(echo "$result" | jq -r '.count // 0' 2>/dev/null)
 
+    local label="Your"
+    if [ -n "$profile" ]; then
+        label="${profile}'s"
+    fi
+
     echo ""
-    echo "🎯 Your offers (${status}): ${count}"
+    echo "🎯 ${label} offers (${status}): ${count}"
     echo ""
 
     echo "$result" | jq -r '.offers[]? | "  \(if .is_favorite == true then "⭐ " else "" end)\(.title // "Untitled")\n    Card: \(.card // "—") | Value: \(if .value then "$\(.value)" else "—" end)\(if (.total_available // 0) > 0 then " | Used: \(.total_used // 0)/\(.total_available)" else "" end)\(if (.max_times // 0) > 1 then " | Max uses: \(.max_times)" else "" end) | Expires: \(.expiration // "—")\(if .redeemed_date then " | Redeemed: \(.redeemed_date)" else "" end)\n    \(.subtitle // "")\n"' 2>/dev/null
@@ -565,8 +580,13 @@ cmd_search() {
     local count
     count=$(echo "$result" | jq -r '.count // 0' 2>/dev/null)
 
+    local label=""
+    if [ -n "$profile" ]; then
+        label=" (${profile})"
+    fi
+
     echo ""
-    echo "🔍 Search results for \"${query}\": ${count}"
+    echo "🔍 Search results for \"${query}\"${label}: ${count}"
     echo ""
 
     echo "$result" | jq -r '.offers[]? | "  \(if .is_favorite == true then "⭐ " else "" end)\(.title // "Untitled")\n    Card: \(.card // "—") | Merchant: \(.merchant // "—")\(if (.total_available // 0) > 0 then " | Used: \(.total_used // 0)/\(.total_available)" else "" end)\(if (.max_times // 0) > 1 then " | Max uses: \(.max_times)" else "" end) | Expires: \(.expiration // "—")\(if .redeemed_date then " | Redeemed: \(.redeemed_date)" else "" end)\n"' 2>/dev/null
