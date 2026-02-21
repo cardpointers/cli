@@ -80,6 +80,9 @@ cardpointers cards --bank chase
 
 # Show all cards (including closed/denied)
 cardpointers cards --status all
+
+# Limit results
+cardpointers cards --limit 5
 ```
 
 ### Profiles
@@ -108,6 +111,9 @@ cardpointers offers --card "gold"
 
 # Only favorites
 cardpointers offers --favorite
+
+# Sort and limit offers
+cardpointers offers --sort value --limit 10
 ```
 
 ### 5. Search offers
@@ -115,6 +121,14 @@ cardpointers offers --favorite
 ```bash
 cardpointers search "streaming"
 cardpointers search "whole foods" --favorite
+cardpointers search "gas" --limit 5
+```
+
+### Global options
+
+```bash
+cardpointers --version
+NO_COLOR=1 cardpointers help
 ```
 
 ## JSON output
@@ -140,6 +154,7 @@ cardpointers recommend restaurant -j
 | `search <query>` | Search offers by keyword |
 | `ping` | Test API connection |
 | `tools` | List available MCP tools |
+| `version` | Show CLI version |
 
 Run `cardpointers help` or `cardpointers <command> --help` for full option details.
 
@@ -154,6 +169,12 @@ Override the API endpoint with:
 
 ```bash
 export CARDPOINTERS_API=https://mcp.cardpointers.com
+```
+
+Disable ANSI colors in output with:
+
+```bash
+export NO_COLOR=1
 ```
 
 ## Requirements
