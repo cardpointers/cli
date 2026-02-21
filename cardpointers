@@ -500,7 +500,7 @@ cmd_cards() {
     result=$(tool_call "list_my_cards" "$args") || exit 1
 
     if [ -n "$limit" ]; then
-        result=$(echo "$result" | jq --argjson n "$limit" ".cards = (.cards[:$n]) | .count = (.cards | length)")
+        result=$(echo "$result" | jq --argjson n "$limit" ".cards = (.cards[:\$n]) | .count = (.cards | length)")
     fi
 
     if [ "$JSON_OUTPUT" = "1" ]; then
@@ -594,7 +594,7 @@ cmd_offers() {
     fi
 
     if [ -n "$limit" ]; then
-        result=$(echo "$result" | jq --argjson n "$limit" ".offers = (.offers[:$n]) | .count = (.offers | length)")
+        result=$(echo "$result" | jq --argjson n "$limit" ".offers = (.offers[:\$n]) | .count = (.offers | length)")
     fi
 
     if [ "$JSON_OUTPUT" = "1" ]; then
@@ -651,7 +651,7 @@ cmd_search() {
     result=$(tool_call "search_my_offers" "$args") || exit 1
 
     if [ -n "$limit" ]; then
-        result=$(echo "$result" | jq --argjson n "$limit" ".offers = (.offers[:$n]) | .count = (.offers | length)")
+        result=$(echo "$result" | jq --argjson n "$limit" ".offers = (.offers[:\$n]) | .count = (.offers | length)")
     fi
 
     if [ "$JSON_OUTPUT" = "1" ]; then
