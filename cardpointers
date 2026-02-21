@@ -21,6 +21,7 @@ CLI_VERSION="1.0.0"
 #   cardpointers search "whole foods"           # search your offers
 #   cardpointers search "streaming" --favorite  # search only favorited offers
 #   cardpointers recommend gas -p any            # best gas card across all profiles
+#   cardpointers profiles                        # list your profiles
 #   cardpointers ping                           # test connection
 #   cardpointers tools                          # list available tools
 #   cardpointers logout                         # clear saved token
@@ -635,6 +636,30 @@ cmd_status() {
     echo ""
 }
 
+cmd_profiles() {
+    local result
+    result=$(tool_call "list_profiles" "null") || exit 1
+
+    local count
+    count=$(echo "$result" | jq -r '.profiles | length' 2>/dev/null)
+    if ! [[ "$count" =~ ^[0-9]+$ ]]; then
+        count=$(echo "$result" | jq -r '.count // 0' 2>/dev/null)
+    fi
+
+    echo ""
+    echo "👥 Your profiles: ${count}"
+    echo ""
+
+    echo "$result" | jq -r '
+        (.profiles // [])
+        | to_entries
+        | .[]
+        | .value as $p
+        | ($p.is_self // $p.is_me // $p.is_current // $p.is_you // false) as $is_self
+        | "  P\((.key + 1))  \($p.nickname // "Unknown") (\($p.email // "—"))" + (if $is_self then " ← you" else "" end)
+    ' 2>/dev/null
+}
+
 cmd_help() {
     local CPINK="\e[38;5;171m"
     local CPBLUE="\e[38;5;69m"
@@ -681,6 +706,7 @@ cmd_help() {
     _help_row "  search <query>" "  ${CPINK}search${RESET} ${CPBLUE}<query>${RESET}" "Search your offers by keyword"
     _help_row "    --favorite, -f" "    ${CPINK}--favorite, -f${RESET}" "Show only favorited offers"
     _help_row "    --profile, -p <value>" "    ${CPINK}--profile, -p${RESET} ${CPBLUE}<value>${RESET}" "Filter by profile (number, name, all)"
+    _help_row "  profiles" "  ${CPINK}profiles${RESET}" "List your linked profiles"
     _help_row "  ping" "  ${CPINK}ping${RESET}" "Test MCP connection"
     _help_row "  tools" "  ${CPINK}tools${RESET}" "List available MCP tools"
     echo ""
@@ -708,6 +734,7 @@ case "$command" in
     cards)      cmd_cards "$@" ;;
     offers)     cmd_offers "$@" ;;
     search)     cmd_search "$@" ;;
+    profiles)   cmd_profiles ;;
     ping)       cmd_ping ;;
     tools)      cmd_tools ;;
     help|--help|-h) cmd_help ;;
