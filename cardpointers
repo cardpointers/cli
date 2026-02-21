@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 CLI_VERSION="1.0.0"
+JSON_OUTPUT=0
 #
 # CardPointers CLI — talk to the MCP server from your terminal
 #
@@ -18,6 +19,8 @@ CLI_VERSION="1.0.0"
 #   cardpointers offers --expiring 14           # expiring within 14 days
 #   cardpointers offers --favorite              # show only favorited offers
 #   cardpointers offers -p all                   # offers from all profiles
+#   cardpointers cards --json                   # raw JSON output
+#   cardpointers offers -j                      # short form
 #   cardpointers search "whole foods"           # search your offers
 #   cardpointers search "streaming" --favorite  # search only favorited offers
 #   cardpointers recommend gas -p any            # best gas card across all profiles
@@ -376,6 +379,8 @@ cmd_recommend() {
 
     while [ $# -gt 0 ]; do
         case "$1" in
+            --json|-j)
+                JSON_OUTPUT=1 ;;
             --merchant|-m)
                 shift; merchant="$1" ;;
             --amount|-a)
@@ -422,6 +427,11 @@ cmd_recommend() {
     local result
     result=$(tool_call "recommend_card" "$args") || exit 1
 
+    if [ "$JSON_OUTPUT" = "1" ]; then
+        echo "$result" | jq .
+        return
+    fi
+
     # Pretty print
     local cat_name merchant_name
     cat_name=$(echo "$result" | jq -r '.category // "Unknown"' 2>/dev/null)
@@ -454,6 +464,7 @@ cmd_cards() {
 
     while [ $# -gt 0 ]; do
         case "$1" in
+            --json|-j) JSON_OUTPUT=1 ;;
             --status|-s) shift; status="$1" ;;
             --bank|-b)   shift; bank="$1" ;;
             --profile|-p) shift; profile="$1" ;;
@@ -473,6 +484,11 @@ cmd_cards() {
 
     local result
     result=$(tool_call "list_my_cards" "$args") || exit 1
+
+    if [ "$JSON_OUTPUT" = "1" ]; then
+        echo "$result" | jq .
+        return
+    fi
 
     local count
     count=$(echo "$result" | jq -r '.count // 0' 2>/dev/null)
@@ -494,6 +510,7 @@ cmd_offers() {
 
     while [ $# -gt 0 ]; do
         case "$1" in
+            --json|-j)      JSON_OUTPUT=1 ;;
             --status|-s)    shift; status="$1" ;;
             --expiring|-e)  status="expiring_soon"
                             # Check if next arg is a number (days)
@@ -543,6 +560,11 @@ cmd_offers() {
     local result
     result=$(tool_call "list_my_offers" "$args") || exit 1
 
+    if [ "$JSON_OUTPUT" = "1" ]; then
+        echo "$result" | jq .
+        return
+    fi
+
     local count
     count=$(echo "$result" | jq -r '.count // 0' 2>/dev/null)
 
@@ -564,6 +586,7 @@ cmd_search() {
 
     while [ $# -gt 0 ]; do
         case "$1" in
+            --json|-j) JSON_OUTPUT=1 ;;
             --favorite|-f) favorite="1" ;;
             --profile|-p) shift; profile="$1" ;;
             *) query_parts+=("$1") ;;
@@ -588,6 +611,11 @@ cmd_search() {
 
     local result
     result=$(tool_call "search_my_offers" "$args") || exit 1
+
+    if [ "$JSON_OUTPUT" = "1" ]; then
+        echo "$result" | jq .
+        return
+    fi
 
     local count
     count=$(echo "$result" | jq -r '.count // 0' 2>/dev/null)
@@ -637,8 +665,21 @@ cmd_status() {
 }
 
 cmd_profiles() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --json|-j) JSON_OUTPUT=1 ;;
+            *) ;;
+        esac
+        shift
+    done
+
     local result
     result=$(tool_call "list_profiles" "null") || exit 1
+
+    if [ "$JSON_OUTPUT" = "1" ]; then
+        echo "$result" | jq .
+        return
+    fi
 
     local count
     count=$(echo "$result" | jq -r '.profiles | length' 2>/dev/null)
@@ -710,6 +751,9 @@ cmd_help() {
     _help_row "  ping" "  ${CPINK}ping${RESET}" "Test MCP connection"
     _help_row "  tools" "  ${CPINK}tools${RESET}" "List available MCP tools"
     echo ""
+    printf "${BOLD}%bGlobal options:%b${RESET}\n" "$CPINK" "$RESET"
+    _help_row "  --json, -j" "  ${CPINK}--json, -j${RESET}" "Output raw JSON instead of formatted text"
+    echo ""
     printf "${BOLD}%bEnvironment:%b${RESET}\n" "$CPINK" "$RESET"
     _help_row "  CARDPOINTERS_API" "  ${CPINK}CARDPOINTERS_API${RESET}" "API base URL (default: https://mcp.cardpointers.com)"
     echo ""
@@ -734,7 +778,7 @@ case "$command" in
     cards)      cmd_cards "$@" ;;
     offers)     cmd_offers "$@" ;;
     search)     cmd_search "$@" ;;
-    profiles)   cmd_profiles ;;
+    profiles)   cmd_profiles "$@" ;;
     ping)       cmd_ping ;;
     tools)      cmd_tools ;;
     help|--help|-h) cmd_help ;;
