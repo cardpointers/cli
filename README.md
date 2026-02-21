@@ -66,7 +66,7 @@ cardpointers recommend supermarket
 cardpointers recommend --merchant "whole foods"
 
 # Include estimated spend for value calculation
-cardpointers recommend dining --amount 75
+cardpointers recommend restaurant --amount 75
 ```
 
 ### 3. View your cards
@@ -124,7 +124,7 @@ Add `--json` (or `-j`) to any data command to print raw JSON instead of the form
 ```bash
 cardpointers cards --json
 cardpointers offers -j
-cardpointers recommend dining -j
+cardpointers recommend restaurant -j
 ```
 
 ## All commands
