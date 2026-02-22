@@ -38,12 +38,25 @@ npm install -g @cardpointers/cli
 curl -fsSL https://raw.githubusercontent.com/cardpointers/cli/main/install.sh | bash
 ```
 
+Installs to `~/.local/bin` by default (or `XDG_BIN_HOME` if set). Override with:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cardpointers/cli/main/install.sh | bash -s -- --bin-dir ~/bin
+```
+
+To install to `/usr/local/bin` (may require sudo):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cardpointers/cli/main/install.sh | bash -s -- --system
+```
+
 ### Manual download
 
 ```bash
 curl -fsSL https://github.com/cardpointers/cli/releases/latest/download/cardpointers -o cardpointers
 chmod +x cardpointers
-sudo mv cardpointers /usr/local/bin/
+mkdir -p ~/.local/bin
+mv cardpointers ~/.local/bin/
 ```
 
 ## Quick start
