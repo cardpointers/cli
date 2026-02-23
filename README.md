@@ -6,7 +6,7 @@
 <p align="center">
   <a href="https://github.com/cardpointers/cli/releases"><img alt="Release" src="https://img.shields.io/github/v/release/cardpointers/cli?style=flat-square&color=BF45F5"></a>
   <a href="https://www.npmjs.com/package/@cardpointers/cli"><img alt="npm" src="https://img.shields.io/npm/v/@cardpointers/cli?style=flat-square&color=4172F6"></a>
-  <a href="https://github.com/cardpointers/cli/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/cardpointers/cli?style=flat-square"></a>
+  <a href="https://github.com/cardpointers/cli/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-BSL%201.1-grey?style=flat-square"></a>
 </p>
 
 ---
