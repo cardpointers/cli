@@ -212,7 +212,7 @@ Issues and pull requests are welcome! Please open an issue first to discuss what
 
 ## License
 
-[MIT](LICENSE) © CardPointers
+[BSL 1.1](LICENSE) © CardPointers
 
 ---
 
