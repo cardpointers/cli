@@ -15,10 +15,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Package tarball
+      - name: Stamp version and package tarball
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          sed -i "s/^CLI_VERSION=\".*\"/CLI_VERSION=\"${VERSION}\"/" cardpointers
           TAR_NAME="cardpointers-${VERSION}.tar.gz"
           tar -czf "$TAR_NAME" cardpointers
 
@@ -28,6 +29,21 @@ jobs:
           files: |
             cardpointers
             cardpointers-${{ env.VERSION }}.tar.gz
+
+      - name: Update version in source
+        env:
+          GH_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/cardpointers/cli.git"
+          git fetch origin main
+          git checkout main
+          sed -i "s/^CLI_VERSION=\".*\"/CLI_VERSION=\"${VERSION}\"/" cardpointers
+          git add cardpointers
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "chore: bump CLI_VERSION to ${VERSION}"
+          git push origin main
 
   update-tap:
     needs: release
