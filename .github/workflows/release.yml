@@ -57,13 +57,13 @@ jobs:
         run: |
           VERSION="${{ steps.sha.outputs.version }}"
           SHA="${{ steps.sha.outputs.sha256 }}"
-          cat > homebrew-tap/Formula/cardpointers.rb << 'FORMULA'
+          cat > homebrew-tap/Formula/cardpointers.rb <<EOF
           class Cardpointers < Formula
             desc "CardPointers CLI — manage your credit card rewards from the terminal"
             homepage "https://cardpointers.com"
-            version "${VERSION}"
+            version "$VERSION"
             url "https://github.com/cardpointers/cli/releases/download/v${VERSION}/cardpointers-${VERSION}.tar.gz"
-            sha256 "${SHA}"
+            sha256 "$SHA"
             license "BUSL-1.1"
 
             depends_on "curl"
@@ -74,14 +74,11 @@ jobs:
             end
 
             test do
-              assert_match "cardpointers", shell_output("#{bin}/cardpointers --help")
+              assert_match "cardpointers", shell_output("\#{bin}/cardpointers --help")
             end
           end
-          FORMULA
+          EOF
           sed -i 's/^          //' homebrew-tap/Formula/cardpointers.rb
-          # Replace variables (heredoc quoted to prevent shell expansion)
-          sed -i "s/\${VERSION}/$VERSION/g" homebrew-tap/Formula/cardpointers.rb
-          sed -i "s/\${SHA}/$SHA/g" homebrew-tap/Formula/cardpointers.rb
 
       - name: Commit and push
         run: |
