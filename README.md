@@ -96,7 +96,15 @@ cardpointers cards --status all
 
 # Limit results
 cardpointers cards --limit 5
+
+# Recently added cards (last 30 days)
+cardpointers cards --added 30
+
+# Sort cards
+cardpointers cards --sort added
 ```
+
+Cards supports `--added` / `-a` N and `--sort` / `-r` (added, name, bank).
 
 ### Profiles
 
@@ -127,7 +135,12 @@ cardpointers offers --favorite
 
 # Sort and limit offers
 cardpointers offers --sort value --limit 10
+
+# New offers this week
+cardpointers offers --added 7 --sort added
 ```
+
+Offers supports `--added` / `-a` N and `--sort` added.
 
 ### 5. Search offers
 
@@ -135,7 +148,26 @@ cardpointers offers --sort value --limit 10
 cardpointers search "streaming"
 cardpointers search "whole foods" --favorite
 cardpointers search "gas" --limit 5
+
+# Search with offer filters
+cardpointers search "dell" --status active --bank amex
 ```
+
+Search supports the same filters as `offers`:
+
+- `--status` / `-s` (active default, snoozed, redeemed, expired, all)
+- `--expiring` / `-e` [days] (expiring within N days, default 7)
+- `--card` / `-c` (filter by card name)
+- `--category` / `-y` (filter by category)
+- `--type` / `-t` (standard/personal)
+- `--bank` / `-b` (amex, chase, citi, boa, usbank, wellsfargo)
+- `--sort` / `-r` (expiring, value, card, added)
+- `--added` / `-a` N (added within last N days)
+
+### Common Use Cases
+
+- New offers this week? → `offers --added 7 --sort added`
+- Recently added cards? → `cards --added 30`
 
 ### Global options
 
