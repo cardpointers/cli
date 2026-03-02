@@ -616,7 +616,7 @@ cmd_offers() {
 }
 
 cmd_search() {
-    local status="all" card="" category="" expiring_days="" offer_type="" bank="" favorite="0" profile="" limit="" sort_by=""
+    local status="active" card="" category="" expiring_days="" offer_type="" bank="" favorite="0" profile="" limit="" sort_by=""
     local query_parts=()
 
     while [ $# -gt 0 ]; do
@@ -828,7 +828,7 @@ cmd_help() {
     _help_row "    --favorite, -f" "    ${CPINK}--favorite, -f${RESET}" "Show only favorited offers"
     _help_row "    --sort, -r <expiring|value|card>" "    ${CPINK}--sort, -r${RESET} ${CPBLUE}<expiring|value|card>${RESET}" "Sort offers"
     _help_row "  search <query>" "  ${CPINK}search${RESET} ${CPBLUE}<query>${RESET}" "Search your offers by keyword"
-    _help_row "    --status, -s <filter>" "    ${CPINK}--status, -s${RESET} ${CPBLUE}<filter>${RESET}" "active, snoozed, redeemed, expired, all (default)"
+    _help_row "    --status, -s <filter>" "    ${CPINK}--status, -s${RESET} ${CPBLUE}<filter>${RESET}" "active (default), snoozed, redeemed, expired, all"
     _help_row "    --expiring, -e [days]" "    ${CPINK}--expiring, -e${RESET} ${CPBLUE}[days]${RESET}" "Show offers expiring within N days (default: 7)"
     _help_row "    --card, -c <name>" "    ${CPINK}--card, -c${RESET} ${CPBLUE}<name>${RESET}" "Filter by card name"
     _help_row "    --category, -y <name>" "    ${CPINK}--category, -y${RESET} ${CPBLUE}<name>${RESET}" "Filter by category"
