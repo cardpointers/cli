@@ -59,6 +59,25 @@ mkdir -p ~/.local/bin
 mv cardpointers ~/.local/bin/
 ```
 
+## Shell completions
+
+CardPointers CLI ships with bash and zsh completions.
+
+### Install from the CLI
+
+```bash
+cardpointers completions bash
+cardpointers completions zsh
+```
+
+### Install via the installer
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cardpointers/cli/main/install.sh | bash -s -- --install-completions
+```
+
+After installing, follow the on-screen instructions to enable completions in your shell.
+
 ## Quick start
 
 ### 1. Log in
@@ -199,6 +218,7 @@ cardpointers recommend restaurant -j
 | `search <query>` | Search offers by keyword |
 | `ping` | Test API connection |
 | `tools` | List available MCP tools |
+| `completions` | Show shell completion setup |
 | `version` | Show CLI version |
 
 Run `cardpointers help` or `cardpointers <command> --help` for full option details.

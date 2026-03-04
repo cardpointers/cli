@@ -3,6 +3,8 @@ set -euo pipefail
 
 REPO="cardpointers/cli"
 BIN_NAME="cardpointers"
+COMPLETIONS_URL_BASE="https://raw.githubusercontent.com/${REPO}/main/completions"
+COMPLETIONS_DIR="${HOME}/.cardpointers/completions"
 
 usage() {
   cat <<'EOF'
@@ -14,6 +16,7 @@ Usage:
 Options:
   -b, --bin-dir <dir>   Install to a specific directory
   --system              Install to /usr/local/bin (may require sudo)
+  --install-completions Download shell completions to ~/.cardpointers/completions
   -h, --help             Show this help
 
 Environment variables:
@@ -69,6 +72,7 @@ chmod +x "$TMP_DIR/$BIN_NAME"
 
 BIN_DIR_OVERRIDE=""
 EXPLICIT_SYSTEM=0
+INSTALL_COMPLETIONS=0
 while [ $# -gt 0 ]; do
   case "$1" in
     -b|--bin-dir)
@@ -78,6 +82,10 @@ while [ $# -gt 0 ]; do
       ;;
     --system)
       EXPLICIT_SYSTEM=1
+      shift
+      ;;
+    --install-completions)
+      INSTALL_COMPLETIONS=1
       shift
       ;;
     -h|--help)
@@ -146,9 +154,24 @@ echo "CardPointers CLI installed."
 echo "Path: $INSTALL_PATH"
 echo "Version: $VERSION"
 
+if [ "$INSTALL_COMPLETIONS" -eq 1 ]; then
+  mkdir -p "$COMPLETIONS_DIR"
+  curl -fsSL "$COMPLETIONS_URL_BASE/cardpointers.bash" -o "$COMPLETIONS_DIR/cardpointers.bash" || fail "Failed to download bash completions"
+  curl -fsSL "$COMPLETIONS_URL_BASE/_cardpointers" -o "$COMPLETIONS_DIR/_cardpointers" || fail "Failed to download zsh completions"
+  echo ""
+  echo "Shell completions installed to $COMPLETIONS_DIR"
+  echo "Enable them with:"
+  echo "  cardpointers completions bash"
+  echo "  cardpointers completions zsh"
+fi
+
 if ! path_contains_dir "$INSTALL_DIR"; then
   echo ""
   echo "Add it to your PATH (choose one):"
   echo "  export PATH=\"$INSTALL_DIR:\$PATH\""
   echo "Then restart your shell."
 fi
+
+echo ""
+echo "Want completions? Run:"
+echo "  cardpointers completions"

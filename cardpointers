@@ -35,6 +35,7 @@ JSON_OUTPUT=0
 #   cardpointers profiles                        # list your profiles
 #   cardpointers ping                            # test connection
 #   cardpointers tools                           # list available tools
+#   cardpointers completions                     # show shell completion setup
 #   cardpointers logout                          # clear saved token
 #   cardpointers --version                       # show version
 
@@ -815,6 +816,52 @@ cmd_profiles() {
     ' 2>/dev/null
 }
 
+cmd_completions() {
+    local shell="${1:-}"
+
+    if [ -z "$shell" ] && [ -n "${SHELL:-}" ]; then
+        case "$SHELL" in
+            */bash) shell="bash" ;;
+            */zsh) shell="zsh" ;;
+        esac
+    fi
+
+    case "$shell" in
+        bash)
+            cat <<'EOF'
+To enable bash completions:
+
+  mkdir -p ~/.cardpointers/completions
+  curl -fsSL https://raw.githubusercontent.com/cardpointers/cli/main/completions/cardpointers.bash -o ~/.cardpointers/completions/cardpointers.bash
+  echo 'source ~/.cardpointers/completions/cardpointers.bash' >> ~/.bashrc
+
+Then restart your shell.
+EOF
+            ;;
+        zsh)
+            cat <<'EOF'
+To enable zsh completions:
+
+  mkdir -p ~/.cardpointers/completions
+  curl -fsSL https://raw.githubusercontent.com/cardpointers/cli/main/completions/_cardpointers -o ~/.cardpointers/completions/_cardpointers
+  echo 'fpath=(~/.cardpointers/completions $fpath)' >> ~/.zshrc
+  autoload -Uz compinit && compinit
+
+Then restart your shell.
+EOF
+            ;;
+        *)
+            cat <<'EOF'
+Usage: cardpointers completions <bash|zsh>
+
+Examples:
+  cardpointers completions bash
+  cardpointers completions zsh
+EOF
+            ;;
+    esac
+}
+
 cmd_help() {
     local CPINK="\e[38;5;171m"
     local CPBLUE="\e[38;5;69m"
@@ -878,6 +925,7 @@ cmd_help() {
     _help_row "  profiles" "  ${CPINK}profiles${RESET}" "List your linked profiles"
     _help_row "  ping" "  ${CPINK}ping${RESET}" "Test MCP connection"
     _help_row "  tools" "  ${CPINK}tools${RESET}" "List available MCP tools"
+    _help_row "  completions" "  ${CPINK}completions${RESET}" "Show shell completion setup"
     echo ""
     printf "${BOLD}%bGlobal options:%b${RESET}\n" "$CPINK" "$RESET"
     _help_row "  --profile, -p <value>" "  ${CPINK}--profile, -p${RESET} ${CPBLUE}<value>${RESET}" "Filter by profile (number, name, all)"
@@ -917,6 +965,7 @@ case "$command" in
     profiles)   cmd_profiles "$@" ;;
     ping)       cmd_ping ;;
     tools)      cmd_tools ;;
+    completions) cmd_completions "$@" ;;
     help|--help|-h) cmd_help ;;
     *)          die "Unknown command: ${command}. Run: cardpointers help" ;;
 esac

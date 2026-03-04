@@ -1,0 +1,84 @@
+#compdef cardpointers
+
+local -a subcmds
+subcmds=(
+  'login:Authenticate'
+  'logout:Clear saved credentials'
+  'status:Show account info and connection status'
+  'recommend:Get a card recommendation'
+  'cards:List your cards'
+  'offers:List your offers'
+  'search:Search your offers'
+  'profiles:List your profiles'
+  'ping:Test MCP connection'
+  'tools:List MCP tools'
+  'help:Show help'
+  'completions:Show completion install instructions'
+)
+local -a subcmd_names
+subcmd_names=(login logout status recommend cards offers search profiles ping tools help completions)
+
+_arguments -C \
+  '--version[Show version]' \
+  '1:command:->command' \
+  '*::arg:->args'
+
+case $state in
+  command)
+    _describe 'command' subcmds
+    ;;
+  args)
+    case $words[2] in
+      recommend)
+        _arguments \
+          '(-m --merchant)'{-m,--merchant}'[Merchant name]:merchant:' \
+          '(-a --amount)'{-a,--amount}'[Purchase amount]:amount:' \
+          '(-p --profile)'{-p,--profile}'[Profile]:profile:' \
+          '(-j --json)'{-j,--json}'[JSON output]' \
+          '*:category:'
+        ;;
+      cards)
+        _arguments \
+          '(-s --status)'{-s,--status}'[Card status]:status:(approved active all applied denied closed)' \
+          '(-b --bank)'{-b,--bank}'[Bank]:bank:' \
+          '(-p --profile)'{-p,--profile}'[Profile]:profile:' \
+          '(-l --limit)'{-l,--limit}'[Limit]:limit:' \
+          '(-j --json)'{-j,--json}'[JSON output]'
+        ;;
+      offers)
+        _arguments \
+          '(-s --status)'{-s,--status}'[Offer status]:status:(active snoozed redeemed expired all)' \
+          '(-e --expiring)'{-e,--expiring}'[Expiring within days]:days:' \
+          '(-f --favorite)'{-f,--favorite}'[Only favorites]' \
+          '(-r --sort)'{-r,--sort}'[Sort by]:sort:(expiring value card)' \
+          '(-l --limit)'{-l,--limit}'[Limit]:limit:' \
+          '(-p --profile)'{-p,--profile}'[Profile]:profile:' \
+          '(-j --json)'{-j,--json}'[JSON output]' \
+          '(-c --card)'{-c,--card}'[Card name]:card:' \
+          '(-y --category)'{-y,--category}'[Category]:category:' \
+          '(-t --type)'{-t,--type}'[Offer type]:type:(standard personal)' \
+          '(-b --bank)'{-b,--bank}'[Bank]:bank:'
+        ;;
+      search)
+        _arguments \
+          '(-f --favorite)'{-f,--favorite}'[Only favorites]' \
+          '(-l --limit)'{-l,--limit}'[Limit]:limit:' \
+          '(-p --profile)'{-p,--profile}'[Profile]:profile:' \
+          '(-j --json)'{-j,--json}'[JSON output]' \
+          '*:query:'
+        ;;
+      profiles)
+        _arguments \
+          '(-j --json)'{-j,--json}'[JSON output]'
+        ;;
+      completions)
+        _arguments \
+          '1:shell:(bash zsh)'
+        ;;
+      help)
+        _arguments \
+          '1:command:($subcmd_names)'
+        ;;
+    esac
+    ;;
+ esac
