@@ -42,6 +42,7 @@ set -uo pipefail
 
 CONFIG_DIR="${HOME}/.cardpointers"
 CONFIG_FILE="${CONFIG_DIR}/config"
+CONFIG_JSON_FILE="${CONFIG_DIR}/config.json"
 API_BASE="${CARDPOINTERS_API:-https://mcp.cardpointers.com}"
 DEBUG="${CARDPOINTERS_DEBUG:-0}"
 
@@ -70,6 +71,12 @@ save_token() {
     chmod 600 "$CONFIG_FILE"
 }
 
+save_api_key_json() {
+    ensure_config_dir
+    printf "{\n  \"api_key\": \"%s\"\n}\n" "$1" > "$CONFIG_JSON_FILE"
+    chmod 600 "$CONFIG_JSON_FILE"
+}
+
 save_user_info() {
     ensure_config_dir
     local email="${1:-}"
@@ -91,10 +98,27 @@ format_profile_label() {
 }
 
 load_token() {
-    if [ ! -f "$CONFIG_FILE" ]; then
-        die "Not logged in. Run: cardpointers login"
+    if [ -n "${CARDPOINTERS_API_KEY:-}" ]; then
+        echo "$CARDPOINTERS_API_KEY"
+        return 0
     fi
-    cat "$CONFIG_FILE"
+
+    if [ -f "$CONFIG_JSON_FILE" ]; then
+        local api_key
+        api_key=$(jq -r '.api_key // empty' "$CONFIG_JSON_FILE" 2>/dev/null) || \
+            die "Invalid JSON in ${CONFIG_JSON_FILE}"
+        if [ -n "$api_key" ]; then
+            echo "$api_key"
+            return 0
+        fi
+    fi
+
+    if [ -f "$CONFIG_FILE" ]; then
+        cat "$CONFIG_FILE"
+        return 0
+    fi
+
+    die "Not logged in. Run: cardpointers login"
 }
 
 load_user_info() {
@@ -203,6 +227,74 @@ tool_call() {
 
     # Try to parse as JSON, fall back to raw text
     echo "$text" | jq . 2>/dev/null || echo "$text"
+}
+
+# ─── Auth helpers ────────────────────────────────────────────────
+
+mask_token() {
+    local token="$1"
+    local len=${#token}
+    if [ "$len" -le 8 ]; then
+        echo "$token"
+    else
+        echo "${token:0:4}...${token: -4}"
+    fi
+}
+
+get_token_source() {
+    if [ -n "${CARDPOINTERS_API_KEY:-}" ]; then
+        echo "env"
+        return 0
+    fi
+    if [ -f "$CONFIG_JSON_FILE" ]; then
+        local api_key
+        api_key=$(jq -r '.api_key // empty' "$CONFIG_JSON_FILE" 2>/dev/null) || \
+            die "Invalid JSON in ${CONFIG_JSON_FILE}"
+        if [ -n "$api_key" ]; then
+            echo "config_json"
+            return 0
+        fi
+    fi
+    if [ -f "$CONFIG_FILE" ]; then
+        echo "legacy"
+        return 0
+    fi
+    echo "none"
+}
+
+verify_token() {
+    local token="$1"
+    local response
+    response=$(curl -s -w "\n%{http_code}" \
+        -X POST "${API_BASE}/mcp" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${token}" \
+        -H "X-MCP-Client: CardPointers CLI/${CLI_VERSION}" \
+        -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\",\"params\":null}")
+
+    local http_code body
+    http_code=$(echo "$response" | tail -1)
+    body=$(echo "$response" | sed '$d')
+
+    if [ -z "$body" ]; then
+        die "Empty response from server (HTTP ${http_code})"
+    fi
+
+    if [ "$http_code" = "401" ] || [ "$http_code" = "403" ]; then
+        die "Auth failed (HTTP ${http_code}). Check your API key."
+    fi
+
+    if [ "$http_code" != "200" ] && [ "$http_code" != "204" ]; then
+        echo "⚠️  HTTP ${http_code} response:" >&2
+        echo "$body" >&2
+        die "Server returned HTTP ${http_code}"
+    fi
+
+    local error
+    error=$(echo "$body" | jq -r '.error.message // empty' 2>/dev/null)
+    if [ -n "$error" ]; then
+        die "MCP error: ${error}"
+    fi
 }
 
 # ─── Commands ─────────────────────────────────────────────────────
@@ -373,8 +465,68 @@ cmd_login_browser() {
 
 cmd_logout() {
     rm -f "$CONFIG_FILE"
+    rm -f "$CONFIG_JSON_FILE"
     rm -f "${CONFIG_DIR}/user.json"
     ok "Logged out"
+}
+
+cmd_config() {
+    local subcommand="${1:-}"
+    shift || true
+
+    case "$subcommand" in
+        set-key)
+            local token="${1:-}"
+            if [ -z "$token" ]; then
+                die "Usage: cardpointers config set-key <JWT>"
+            fi
+            verify_token "$token"
+            save_api_key_json "$token"
+            ok "Saved API key to ${CONFIG_JSON_FILE}"
+            ;;
+        show)
+            local raw=0
+            while [ $# -gt 0 ]; do
+                case "$1" in
+                    --raw) raw=1 ;;
+                    *) die "Usage: cardpointers config show [--raw]" ;;
+                esac
+                shift
+            done
+
+            local source token
+            source=$(get_token_source)
+            token=$(load_token)
+
+            if [ "$source" = "none" ] || [ -z "$token" ]; then
+                die "No API key found. Run: cardpointers login"
+            fi
+
+            if [ "$raw" = "1" ]; then
+                echo "$token"
+                return 0
+            fi
+
+            local source_label
+            case "$source" in
+                env) source_label="Environment (CARDPOINTERS_API_KEY)" ;;
+                config_json) source_label="Config (${CONFIG_JSON_FILE})" ;;
+                legacy) source_label="Legacy config (${CONFIG_FILE})" ;;
+                *) source_label="Unknown" ;;
+            esac
+
+            echo "Auth source: ${source_label}"
+            echo "Token: $(mask_token "$token")"
+            ;;
+        ""|help|--help|-h)
+            echo "Usage:"
+            echo "  cardpointers config set-key <JWT>"
+            echo "  cardpointers config show [--raw]"
+            ;;
+        *)
+            die "Unknown config command: ${subcommand}. Run: cardpointers config help"
+            ;;
+    esac
 }
 
 cmd_ping() {
@@ -846,6 +998,8 @@ cmd_help() {
     printf "${BOLD}%bCommands:%b${RESET}\n" "$CPINK" "$RESET"
     _help_row "  login" "  ${CPINK}login${RESET}" "Log in (supports Apple, Google, passkeys, etc)"
     _help_row "  logout" "  ${CPINK}logout${RESET}" "Clear saved credentials"
+    _help_row "  config set-key <jwt>" "  ${CPINK}config${RESET} ${CPBLUE}set-key <jwt>${RESET}" "Store an API key in config.json"
+    _help_row "  config show [--raw]" "  ${CPINK}config${RESET} ${CPBLUE}show [--raw]${RESET}" "Show current auth source"
     _help_row "  status" "  ${CPINK}status${RESET}" "Show account info and connection status"
     _help_row "  recommend <category>" "  ${CPINK}recommend${RESET} ${CPBLUE}<category>${RESET}" "Best card for a purchase category/store"
     _help_row "    --merchant, -m <name>" "    ${CPINK}--merchant, -m${RESET} ${CPBLUE}<name>${RESET}" "Look up by merchant name/URL instead"
@@ -886,6 +1040,7 @@ cmd_help() {
     echo ""
     printf "${BOLD}%bEnvironment:%b${RESET}\n" "$CPINK" "$RESET"
     _help_row "  CARDPOINTERS_API" "  ${CPINK}CARDPOINTERS_API${RESET}" "API base URL (default: https://mcp.cardpointers.com)"
+    _help_row "  CARDPOINTERS_API_KEY" "  ${CPINK}CARDPOINTERS_API_KEY${RESET}" "API key (overrides saved config)"
     _help_row "  NO_COLOR" "  ${CPINK}NO_COLOR${RESET}" "Disable ANSI colors in output"
 }
 
@@ -909,6 +1064,7 @@ shift
 case "$command" in
     login)      cmd_login "$@" ;;
     logout)     cmd_logout ;;
+    config)     cmd_config "$@" ;;
     status)     cmd_status ;;
     recommend)  cmd_recommend "$@" ;;
     cards)      cmd_cards "$@" ;;
