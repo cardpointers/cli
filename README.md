@@ -192,6 +192,8 @@ cardpointers recommend restaurant -j
 |---------|-------------|
 | `login` | Authenticate (email/password or browser OAuth) |
 | `logout` | Clear saved credentials |
+| `config set-key <jwt>` | Save an API key to config.json |
+| `config show [--raw]` | Show current auth source (use --raw to print token) |
 | `status` | Show account info and connection status |
 | `recommend <category>` | Get best card for a purchase category |
 | `cards` | List your wallet cards |
@@ -207,8 +209,15 @@ Run `cardpointers help` or `cardpointers <command> --help` for full option detai
 
 | Item | Location |
 |------|----------|
-| Auth token | `~/.cardpointers/config` |
+| API key (preferred) | `CARDPOINTERS_API_KEY` or `~/.cardpointers/config.json` |
+| Legacy auth token | `~/.cardpointers/config` |
 | User info | `~/.cardpointers/user.json` |
+
+Auth priority order:
+
+1. `CARDPOINTERS_API_KEY`
+2. `~/.cardpointers/config.json` → `api_key`
+3. `~/.cardpointers/config`
 
 Override the API endpoint with:
 
@@ -237,6 +246,85 @@ The CLI brings your wallet to the terminal — perfect for quick lookups, script
 ## MCP integration
 
 CardPointers CLI talks to the same [MCP (Model Context Protocol)](https://mcp.cardpointers.com/mcp) server that powers integrations with Claude, ChatGPT, and other AI assistants. You can use the CLI as a standalone tool or as part of an AI agent workflow.
+
+## MCP Server Configuration
+
+Use your CardPointers JWT token as a Bearer token header. You can get one by running `cardpointers login` and then `cardpointers config show --raw`, or by logging in at cardpointers.com and copying the token from Settings → API.
+
+**Claude Desktop** (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "cardpointers": {
+      "url": "https://mcp.cardpointers.com/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_JWT_TOKEN"
+      }
+    }
+  }
+}
+```
+
+**Cursor** (`.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "cardpointers": {
+      "url": "https://mcp.cardpointers.com/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_JWT_TOKEN"
+      }
+    }
+  }
+}
+```
+
+**VS Code** (`.vscode/mcp.json`):
+
+```json
+{
+  "servers": {
+    "cardpointers": {
+      "url": "https://mcp.cardpointers.com/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_JWT_TOKEN"
+      }
+    }
+  }
+}
+```
+
+**Claude Code** (`.claude/settings.json`):
+
+```json
+{
+  "mcpServers": {
+    "cardpointers": {
+      "url": "https://mcp.cardpointers.com/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_JWT_TOKEN"
+      }
+    }
+  }
+}
+```
+
+**Windsurf** (`~/.codeium/windsurf/mcp_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "cardpointers": {
+      "url": "https://mcp.cardpointers.com/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_JWT_TOKEN"
+      }
+    }
+  }
+}
+```
 
 ## Contributing
 
