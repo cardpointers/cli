@@ -33,6 +33,8 @@ JSON_OUTPUT=0
 #   cardpointers search "streaming" --favorite   # search only favorited offers
 #   cardpointers search "gas" --limit 5          # limit search results
 #   cardpointers profiles                        # list your profiles
+#   cardpointers upgrade                         # view CardPointers+ plans
+#   cardpointers upgrade annual                  # upgrade via Stripe Link CLI
 #   cardpointers ping                            # test connection
 #   cardpointers tools                           # list available tools
 #   cardpointers logout                          # clear saved token
@@ -930,6 +932,175 @@ cmd_status() {
     echo ""
 }
 
+cmd_upgrade() {
+    local plan=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --json|-j) JSON_OUTPUT=1 ;;
+            monthly|annual|lifetime) plan="$1" ;;
+            *) ;;
+        esac
+        shift
+    done
+
+    # Fetch plan info from the server
+    local args="{}"
+    if [ -n "$plan" ]; then
+        args="{\"plan\":\"${plan}\"}"
+    fi
+
+    local result
+    result=$(tool_call "subscribe_to_plus" "$args") || exit 1
+
+    if [ "$JSON_OUTPUT" = "1" ]; then
+        echo "$result" | jq .
+        return
+    fi
+
+    local status
+    status=$(echo "$result" | jq -r '.status // ""' 2>/dev/null)
+
+    if [ "$status" = "already_subscribed" ]; then
+        local expires is_lifetime
+        expires=$(echo "$result" | jq -r '.expires // "N/A"' 2>/dev/null)
+        is_lifetime=$(echo "$result" | jq -r '.is_lifetime // false' 2>/dev/null)
+        echo ""
+        ok "You already have CardPointers+!"
+        if [ "$is_lifetime" = "true" ]; then
+            echo "  Plan: Lifetime"
+        elif [ "$expires" != "null" ] && [ "$expires" != "N/A" ]; then
+            echo "  Expires: ${expires}"
+        fi
+        echo ""
+        return
+    fi
+
+    local upgrade_url
+    upgrade_url=$(echo "$result" | jq -r '.upgrade_url // ""' 2>/dev/null)
+
+    echo ""
+    echo "⭐ Upgrade to CardPointers+"
+    echo ""
+
+    # Show plans
+    echo "$result" | jq -r '
+        .plans | to_entries[] |
+        "  \(.value.name): \(.value.price_display)"
+    ' 2>/dev/null
+
+    echo ""
+
+    # Check if Stripe Link CLI is available
+    if command -v link-cli >/dev/null 2>&1 || npx --yes @stripe/link-cli auth status --format json >/dev/null 2>&1; then
+        echo "  💳 Stripe Link CLI detected!"
+        echo ""
+
+        if [ -z "$plan" ]; then
+            echo "  Choose a plan:"
+            echo "    cardpointers upgrade monthly"
+            echo "    cardpointers upgrade annual"
+            echo "    cardpointers upgrade lifetime"
+            echo ""
+            return
+        fi
+
+        local amount price_display
+        amount=$(echo "$result" | jq -r ".plans.${plan}.price // 0" 2>/dev/null)
+        price_display=$(echo "$result" | jq -r ".plans.${plan}.price_display // \"\"" 2>/dev/null)
+
+        if [ "$amount" = "0" ] || [ "$amount" = "null" ]; then
+            die "Unknown plan: ${plan}"
+        fi
+
+        echo "  Plan: ${plan} (${price_display})"
+        echo ""
+
+        # List payment methods
+        local pm_list
+        pm_list=$(npx --yes @stripe/link-cli payment-methods list --format json 2>/dev/null) || {
+            echo "  ⚠️  Not logged in to Stripe Link."
+            echo "  Run: npx @stripe/link-cli auth login"
+            echo ""
+            echo "  Or subscribe manually:"
+            echo "  ${upgrade_url}"
+            echo ""
+            return
+        }
+
+        local pm_count
+        pm_count=$(echo "$pm_list" | jq -r '.payment_methods | length' 2>/dev/null)
+
+        if [ "$pm_count" = "0" ] || [ "$pm_count" = "null" ]; then
+            echo "  ⚠️  No payment methods in your Stripe Link wallet."
+            echo "  Add one at: https://app.link.com/wallet"
+            echo ""
+            echo "  Or subscribe manually:"
+            echo "  ${upgrade_url}"
+            echo ""
+            return
+        fi
+
+        # Use the first payment method
+        local pm_id
+        pm_id=$(echo "$pm_list" | jq -r '.payment_methods[0].id' 2>/dev/null)
+
+        local interval_label="subscription"
+        if [ "$plan" = "lifetime" ]; then
+            interval_label="one-time purchase"
+        fi
+
+        local line_item="name:CardPointers+ (${plan}),unit_amount:${amount},quantity:1"
+        local context="Upgrading to CardPointers+ ${plan} plan (${price_display}). User initiated this ${interval_label} through the CardPointers CLI. CardPointers helps users maximize credit card rewards by recommending the best card for every purchase."
+
+        echo "  Requesting payment approval..."
+        echo "  📱 Check your phone to approve the payment."
+        echo ""
+
+        local spend_result
+        spend_result=$(npx --yes @stripe/link-cli spend-request create \
+            --payment-method-id "$pm_id" \
+            --merchant-name "CardPointers" \
+            --merchant-url "https://cardpointers.com" \
+            --context "$context" \
+            --amount "$amount" \
+            --line-item "$line_item" \
+            --total "type:total,display_text:Total,amount:${amount}" \
+            --request-approval \
+            --format json 2>/dev/null)
+
+        local spend_status
+        spend_status=$(echo "$spend_result" | jq -r '.status // ""' 2>/dev/null)
+
+        if [ "$spend_status" = "approved" ]; then
+            ok "Payment approved!"
+            echo ""
+            echo "  Your CardPointers+ subscription is being activated."
+            echo "  This may take a moment to reflect in the app."
+            echo ""
+        elif [ "$spend_status" = "denied" ]; then
+            echo "  ❌ Payment was denied."
+            echo ""
+            echo "  You can subscribe manually instead:"
+            echo "  ${upgrade_url}"
+            echo ""
+        else
+            echo "  ⚠️  Payment request status: ${spend_status:-unknown}"
+            echo ""
+            echo "  You can subscribe manually instead:"
+            echo "  ${upgrade_url}"
+            echo ""
+        fi
+    else
+        # No Stripe Link CLI — show manual upgrade URL
+        echo "  Subscribe at:"
+        echo "  ${upgrade_url}"
+        echo ""
+        echo "  💡 Install Stripe Link CLI for in-terminal checkout:"
+        echo "  npm i -g @stripe/link-cli"
+        echo ""
+    fi
+}
+
 cmd_profiles() {
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -1030,6 +1201,7 @@ cmd_help() {
     _help_row "    --added, -a <days>" "    ${CPINK}--added, -a${RESET} ${CPBLUE}<days>${RESET}" "Added within the last N days"
     _help_row "    --sort, -r <field>" "    ${CPINK}--sort, -r${RESET} ${CPBLUE}<field>${RESET}" "Sort by expiring, value, card, or added"
     _help_row "  profiles" "  ${CPINK}profiles${RESET}" "List your linked profiles"
+    _help_row "  upgrade [plan]" "  ${CPINK}upgrade${RESET} ${CPBLUE}[monthly|annual|lifetime]${RESET}" "Upgrade to CardPointers+"
     _help_row "  ping" "  ${CPINK}ping${RESET}" "Test MCP connection"
     _help_row "  tools" "  ${CPINK}tools${RESET}" "List available MCP tools"
     echo ""
@@ -1071,6 +1243,7 @@ case "$command" in
     offers)     cmd_offers "$@" ;;
     search)     cmd_search "$@" ;;
     profiles)   cmd_profiles "$@" ;;
+    upgrade)    cmd_upgrade "$@" ;;
     ping)       cmd_ping ;;
     tools)      cmd_tools ;;
     help|--help|-h) cmd_help ;;
