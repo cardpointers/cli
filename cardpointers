@@ -33,6 +33,8 @@ JSON_OUTPUT=0
 #   cardpointers search "streaming" --favorite   # search only favorited offers
 #   cardpointers search "gas" --limit 5          # limit search results
 #   cardpointers profiles                        # list your profiles
+#   cardpointers upgrade                         # view CardPointers+ plans
+#   cardpointers upgrade annual                  # upgrade via Stripe Link CLI
 #   cardpointers ping                            # test connection
 #   cardpointers tools                           # list available tools
 #   cardpointers logout                          # clear saved token
@@ -42,6 +44,7 @@ set -uo pipefail
 
 CONFIG_DIR="${HOME}/.cardpointers"
 CONFIG_FILE="${CONFIG_DIR}/config"
+CONFIG_JSON_FILE="${CONFIG_DIR}/config.json"
 API_BASE="${CARDPOINTERS_API:-https://mcp.cardpointers.com}"
 DEBUG="${CARDPOINTERS_DEBUG:-0}"
 
@@ -70,6 +73,12 @@ save_token() {
     chmod 600 "$CONFIG_FILE"
 }
 
+save_api_key_json() {
+    ensure_config_dir
+    printf "{\n  \"api_key\": \"%s\"\n}\n" "$1" > "$CONFIG_JSON_FILE"
+    chmod 600 "$CONFIG_JSON_FILE"
+}
+
 save_user_info() {
     ensure_config_dir
     local email="${1:-}"
@@ -91,10 +100,27 @@ format_profile_label() {
 }
 
 load_token() {
-    if [ ! -f "$CONFIG_FILE" ]; then
-        die "Not logged in. Run: cardpointers login"
+    if [ -n "${CARDPOINTERS_API_KEY:-}" ]; then
+        echo "$CARDPOINTERS_API_KEY"
+        return 0
     fi
-    cat "$CONFIG_FILE"
+
+    if [ -f "$CONFIG_JSON_FILE" ]; then
+        local api_key
+        api_key=$(jq -r '.api_key // empty' "$CONFIG_JSON_FILE" 2>/dev/null) || \
+            die "Invalid JSON in ${CONFIG_JSON_FILE}"
+        if [ -n "$api_key" ]; then
+            echo "$api_key"
+            return 0
+        fi
+    fi
+
+    if [ -f "$CONFIG_FILE" ]; then
+        cat "$CONFIG_FILE"
+        return 0
+    fi
+
+    die "Not logged in. Run: cardpointers login"
 }
 
 load_user_info() {
@@ -203,6 +229,74 @@ tool_call() {
 
     # Try to parse as JSON, fall back to raw text
     echo "$text" | jq . 2>/dev/null || echo "$text"
+}
+
+# ─── Auth helpers ────────────────────────────────────────────────
+
+mask_token() {
+    local token="$1"
+    local len=${#token}
+    if [ "$len" -le 8 ]; then
+        echo "$token"
+    else
+        echo "${token:0:4}...${token: -4}"
+    fi
+}
+
+get_token_source() {
+    if [ -n "${CARDPOINTERS_API_KEY:-}" ]; then
+        echo "env"
+        return 0
+    fi
+    if [ -f "$CONFIG_JSON_FILE" ]; then
+        local api_key
+        api_key=$(jq -r '.api_key // empty' "$CONFIG_JSON_FILE" 2>/dev/null) || \
+            die "Invalid JSON in ${CONFIG_JSON_FILE}"
+        if [ -n "$api_key" ]; then
+            echo "config_json"
+            return 0
+        fi
+    fi
+    if [ -f "$CONFIG_FILE" ]; then
+        echo "legacy"
+        return 0
+    fi
+    echo "none"
+}
+
+verify_token() {
+    local token="$1"
+    local response
+    response=$(curl -s -w "\n%{http_code}" \
+        -X POST "${API_BASE}/mcp" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${token}" \
+        -H "X-MCP-Client: CardPointers CLI/${CLI_VERSION}" \
+        -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\",\"params\":null}")
+
+    local http_code body
+    http_code=$(echo "$response" | tail -1)
+    body=$(echo "$response" | sed '$d')
+
+    if [ -z "$body" ]; then
+        die "Empty response from server (HTTP ${http_code})"
+    fi
+
+    if [ "$http_code" = "401" ] || [ "$http_code" = "403" ]; then
+        die "Auth failed (HTTP ${http_code}). Check your API key."
+    fi
+
+    if [ "$http_code" != "200" ] && [ "$http_code" != "204" ]; then
+        echo "⚠️  HTTP ${http_code} response:" >&2
+        echo "$body" >&2
+        die "Server returned HTTP ${http_code}"
+    fi
+
+    local error
+    error=$(echo "$body" | jq -r '.error.message // empty' 2>/dev/null)
+    if [ -n "$error" ]; then
+        die "MCP error: ${error}"
+    fi
 }
 
 # ─── Commands ─────────────────────────────────────────────────────
@@ -373,8 +467,68 @@ cmd_login_browser() {
 
 cmd_logout() {
     rm -f "$CONFIG_FILE"
+    rm -f "$CONFIG_JSON_FILE"
     rm -f "${CONFIG_DIR}/user.json"
     ok "Logged out"
+}
+
+cmd_config() {
+    local subcommand="${1:-}"
+    shift || true
+
+    case "$subcommand" in
+        set-key)
+            local token="${1:-}"
+            if [ -z "$token" ]; then
+                die "Usage: cardpointers config set-key <JWT>"
+            fi
+            verify_token "$token"
+            save_api_key_json "$token"
+            ok "Saved API key to ${CONFIG_JSON_FILE}"
+            ;;
+        show)
+            local raw=0
+            while [ $# -gt 0 ]; do
+                case "$1" in
+                    --raw) raw=1 ;;
+                    *) die "Usage: cardpointers config show [--raw]" ;;
+                esac
+                shift
+            done
+
+            local source token
+            source=$(get_token_source)
+            token=$(load_token)
+
+            if [ "$source" = "none" ] || [ -z "$token" ]; then
+                die "No API key found. Run: cardpointers login"
+            fi
+
+            if [ "$raw" = "1" ]; then
+                echo "$token"
+                return 0
+            fi
+
+            local source_label
+            case "$source" in
+                env) source_label="Environment (CARDPOINTERS_API_KEY)" ;;
+                config_json) source_label="Config (${CONFIG_JSON_FILE})" ;;
+                legacy) source_label="Legacy config (${CONFIG_FILE})" ;;
+                *) source_label="Unknown" ;;
+            esac
+
+            echo "Auth source: ${source_label}"
+            echo "Token: $(mask_token "$token")"
+            ;;
+        ""|help|--help|-h)
+            echo "Usage:"
+            echo "  cardpointers config set-key <JWT>"
+            echo "  cardpointers config show [--raw]"
+            ;;
+        *)
+            die "Unknown config command: ${subcommand}. Run: cardpointers config help"
+            ;;
+    esac
 }
 
 cmd_ping() {
@@ -778,6 +932,175 @@ cmd_status() {
     echo ""
 }
 
+cmd_upgrade() {
+    local plan=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --json|-j) JSON_OUTPUT=1 ;;
+            monthly|annual|lifetime) plan="$1" ;;
+            *) ;;
+        esac
+        shift
+    done
+
+    # Fetch plan info from the server
+    local args="{}"
+    if [ -n "$plan" ]; then
+        args="{\"plan\":\"${plan}\"}"
+    fi
+
+    local result
+    result=$(tool_call "subscribe_to_plus" "$args") || exit 1
+
+    if [ "$JSON_OUTPUT" = "1" ]; then
+        echo "$result" | jq .
+        return
+    fi
+
+    local status
+    status=$(echo "$result" | jq -r '.status // ""' 2>/dev/null)
+
+    if [ "$status" = "already_subscribed" ]; then
+        local expires is_lifetime
+        expires=$(echo "$result" | jq -r '.expires // "N/A"' 2>/dev/null)
+        is_lifetime=$(echo "$result" | jq -r '.is_lifetime // false' 2>/dev/null)
+        echo ""
+        ok "You already have CardPointers+!"
+        if [ "$is_lifetime" = "true" ]; then
+            echo "  Plan: Lifetime"
+        elif [ "$expires" != "null" ] && [ "$expires" != "N/A" ]; then
+            echo "  Expires: ${expires}"
+        fi
+        echo ""
+        return
+    fi
+
+    local upgrade_url
+    upgrade_url=$(echo "$result" | jq -r '.upgrade_url // ""' 2>/dev/null)
+
+    echo ""
+    echo "⭐ Upgrade to CardPointers+"
+    echo ""
+
+    # Show plans
+    echo "$result" | jq -r '
+        .plans | to_entries[] |
+        "  \(.value.name): \(.value.price_display)"
+    ' 2>/dev/null
+
+    echo ""
+
+    # Check if Stripe Link CLI is available
+    if command -v link-cli >/dev/null 2>&1 || npx --yes @stripe/link-cli auth status --format json >/dev/null 2>&1; then
+        echo "  💳 Stripe Link CLI detected!"
+        echo ""
+
+        if [ -z "$plan" ]; then
+            echo "  Choose a plan:"
+            echo "    cardpointers upgrade monthly"
+            echo "    cardpointers upgrade annual"
+            echo "    cardpointers upgrade lifetime"
+            echo ""
+            return
+        fi
+
+        local amount price_display
+        amount=$(echo "$result" | jq -r ".plans.${plan}.price // 0" 2>/dev/null)
+        price_display=$(echo "$result" | jq -r ".plans.${plan}.price_display // \"\"" 2>/dev/null)
+
+        if [ "$amount" = "0" ] || [ "$amount" = "null" ]; then
+            die "Unknown plan: ${plan}"
+        fi
+
+        echo "  Plan: ${plan} (${price_display})"
+        echo ""
+
+        # List payment methods
+        local pm_list
+        pm_list=$(npx --yes @stripe/link-cli payment-methods list --format json 2>/dev/null) || {
+            echo "  ⚠️  Not logged in to Stripe Link."
+            echo "  Run: npx @stripe/link-cli auth login"
+            echo ""
+            echo "  Or subscribe manually:"
+            echo "  ${upgrade_url}"
+            echo ""
+            return
+        }
+
+        local pm_count
+        pm_count=$(echo "$pm_list" | jq -r '.payment_methods | length' 2>/dev/null)
+
+        if [ "$pm_count" = "0" ] || [ "$pm_count" = "null" ]; then
+            echo "  ⚠️  No payment methods in your Stripe Link wallet."
+            echo "  Add one at: https://app.link.com/wallet"
+            echo ""
+            echo "  Or subscribe manually:"
+            echo "  ${upgrade_url}"
+            echo ""
+            return
+        fi
+
+        # Use the first payment method
+        local pm_id
+        pm_id=$(echo "$pm_list" | jq -r '.payment_methods[0].id' 2>/dev/null)
+
+        local interval_label="subscription"
+        if [ "$plan" = "lifetime" ]; then
+            interval_label="one-time purchase"
+        fi
+
+        local line_item="name:CardPointers+ (${plan}),unit_amount:${amount},quantity:1"
+        local context="Upgrading to CardPointers+ ${plan} plan (${price_display}). User initiated this ${interval_label} through the CardPointers CLI. CardPointers helps users maximize credit card rewards by recommending the best card for every purchase."
+
+        echo "  Requesting payment approval..."
+        echo "  📱 Check your phone to approve the payment."
+        echo ""
+
+        local spend_result
+        spend_result=$(npx --yes @stripe/link-cli spend-request create \
+            --payment-method-id "$pm_id" \
+            --merchant-name "CardPointers" \
+            --merchant-url "https://cardpointers.com" \
+            --context "$context" \
+            --amount "$amount" \
+            --line-item "$line_item" \
+            --total "type:total,display_text:Total,amount:${amount}" \
+            --request-approval \
+            --format json 2>/dev/null)
+
+        local spend_status
+        spend_status=$(echo "$spend_result" | jq -r '.status // ""' 2>/dev/null)
+
+        if [ "$spend_status" = "approved" ]; then
+            ok "Payment approved!"
+            echo ""
+            echo "  Your CardPointers+ subscription is being activated."
+            echo "  This may take a moment to reflect in the app."
+            echo ""
+        elif [ "$spend_status" = "denied" ]; then
+            echo "  ❌ Payment was denied."
+            echo ""
+            echo "  You can subscribe manually instead:"
+            echo "  ${upgrade_url}"
+            echo ""
+        else
+            echo "  ⚠️  Payment request status: ${spend_status:-unknown}"
+            echo ""
+            echo "  You can subscribe manually instead:"
+            echo "  ${upgrade_url}"
+            echo ""
+        fi
+    else
+        # No Stripe Link CLI — show manual upgrade URL
+        echo "  Subscribe at:"
+        echo "  ${upgrade_url}"
+        echo ""
+        echo "  💡 Install Stripe Link CLI for in-terminal checkout:"
+        echo "  npm i -g @stripe/link-cli"
+        echo ""
+    fi
+}
+
 cmd_profiles() {
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -846,6 +1169,8 @@ cmd_help() {
     printf "${BOLD}%bCommands:%b${RESET}\n" "$CPINK" "$RESET"
     _help_row "  login" "  ${CPINK}login${RESET}" "Log in (supports Apple, Google, passkeys, etc)"
     _help_row "  logout" "  ${CPINK}logout${RESET}" "Clear saved credentials"
+    _help_row "  config set-key <jwt>" "  ${CPINK}config${RESET} ${CPBLUE}set-key <jwt>${RESET}" "Store an API key in config.json"
+    _help_row "  config show [--raw]" "  ${CPINK}config${RESET} ${CPBLUE}show [--raw]${RESET}" "Show current auth source"
     _help_row "  status" "  ${CPINK}status${RESET}" "Show account info and connection status"
     _help_row "  recommend <category>" "  ${CPINK}recommend${RESET} ${CPBLUE}<category>${RESET}" "Best card for a purchase category/store"
     _help_row "    --merchant, -m <name>" "    ${CPINK}--merchant, -m${RESET} ${CPBLUE}<name>${RESET}" "Look up by merchant name/URL instead"
@@ -876,6 +1201,7 @@ cmd_help() {
     _help_row "    --added, -a <days>" "    ${CPINK}--added, -a${RESET} ${CPBLUE}<days>${RESET}" "Added within the last N days"
     _help_row "    --sort, -r <field>" "    ${CPINK}--sort, -r${RESET} ${CPBLUE}<field>${RESET}" "Sort by expiring, value, card, or added"
     _help_row "  profiles" "  ${CPINK}profiles${RESET}" "List your linked profiles"
+    _help_row "  upgrade [plan]" "  ${CPINK}upgrade${RESET} ${CPBLUE}[monthly|annual|lifetime]${RESET}" "Upgrade to CardPointers+"
     _help_row "  ping" "  ${CPINK}ping${RESET}" "Test MCP connection"
     _help_row "  tools" "  ${CPINK}tools${RESET}" "List available MCP tools"
     echo ""
@@ -886,6 +1212,7 @@ cmd_help() {
     echo ""
     printf "${BOLD}%bEnvironment:%b${RESET}\n" "$CPINK" "$RESET"
     _help_row "  CARDPOINTERS_API" "  ${CPINK}CARDPOINTERS_API${RESET}" "API base URL (default: https://mcp.cardpointers.com)"
+    _help_row "  CARDPOINTERS_API_KEY" "  ${CPINK}CARDPOINTERS_API_KEY${RESET}" "API key (overrides saved config)"
     _help_row "  NO_COLOR" "  ${CPINK}NO_COLOR${RESET}" "Disable ANSI colors in output"
 }
 
@@ -909,12 +1236,14 @@ shift
 case "$command" in
     login)      cmd_login "$@" ;;
     logout)     cmd_logout ;;
+    config)     cmd_config "$@" ;;
     status)     cmd_status ;;
     recommend)  cmd_recommend "$@" ;;
     cards)      cmd_cards "$@" ;;
     offers)     cmd_offers "$@" ;;
     search)     cmd_search "$@" ;;
     profiles)   cmd_profiles "$@" ;;
+    upgrade)    cmd_upgrade "$@" ;;
     ping)       cmd_ping ;;
     tools)      cmd_tools ;;
     help|--help|-h) cmd_help ;;
